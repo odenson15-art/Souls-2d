@@ -9,6 +9,7 @@ var energy:ProgressBar
 var enemy_health:ProgressBar
 var notice="Close the distance. Watch for the red wind-up."
 var finished=false
+var previewing=false
 var shake=0.0
 func bind(action:String,keys:Array):
  if InputMap.has_action(action):return
@@ -42,7 +43,8 @@ func _ready():
  enemy_health=bar(ui,Vector2(882,72),Color("d78761"))
  hint=label(ui,Vector2(30,570),21,"")
  label(ui,Vector2(30,655),18,"A/D  MOVE     Z  COMBO     X  HEAVY     C  GUARD     V  QUICKSTEP     B  HEAL     R  RESET")
- label(ui,Vector2(30,685),14,"Hold your ground. Spend stamina wisely. Quickstep through attacks.")
+ label(ui,Vector2(30,685),14,"ENTER  ANIMATION VIEWER  •  Hold your ground. Spend stamina wisely.")
+ var viewer=CanvasLayer.new();viewer.set_script(load("res://animation_viewer.gd"));viewer.arena=self;add_child(viewer)
 func box(pos:Vector3,size:Vector3,color:Color,solid=false):
  var mesh=MeshInstance3D.new();var cube=BoxMesh.new();cube.size=size;mesh.mesh=cube;mesh.position=pos
  var mat=StandardMaterial3D.new();mat.albedo_color=color;mat.roughness=0.85;mesh.material_override=mat;add_child(mesh)
@@ -56,6 +58,7 @@ func bar(ui:Node,pos:Vector2,color:Color)->ProgressBar:
 func finish(lost:bool):
  finished=true;notice="YOU FELL — Recovering… Explore freely, or R to retry" if lost else "TRIAL COMPLETE — Explore freely, or R to spar again"
 func _process(dt):
+ if previewing:return
  if Input.is_action_just_pressed("restart"):get_tree().reload_current_scene();return
  health.value=player.hp;energy.value=player.stamina;enemy_health.value=enemy.hp
  hint.text=notice+"\n"+str(player.potions)+" healing charges  •  Quickstep costs 22 stamina"
