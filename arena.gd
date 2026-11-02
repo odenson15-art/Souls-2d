@@ -16,7 +16,7 @@ func bind(action:String,keys:Array):
  for k in keys:
   var e=InputEventKey.new();e.physical_keycode=k;InputMap.action_add_event(action,e)
 func _ready():
- bind("left",[KEY_A,KEY_LEFT]);bind("right",[KEY_D,KEY_RIGHT]);bind("attack",[KEY_J]);bind("heavy",[KEY_K]);bind("block",[KEY_L]);bind("dodge",[KEY_SPACE]);bind("heal",[KEY_E]);bind("restart",[KEY_R])
+ bind("left",[KEY_A,KEY_LEFT]);bind("right",[KEY_D,KEY_RIGHT]);bind("attack",[KEY_Z]);bind("heavy",[KEY_X]);bind("block",[KEY_C]);bind("dodge",[KEY_V]);bind("heal",[KEY_B]);bind("restart",[KEY_R])
  var world=WorldEnvironment.new();var env=Environment.new();env.background_mode=Environment.BG_COLOR;env.background_color=Color("101827");env.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR;env.ambient_light_color=Color("9ab4cf");env.ambient_light_energy=0.65;env.tonemap_mode=Environment.TONE_MAPPER_FILMIC;world.environment=env;add_child(world)
  var sun=DirectionalLight3D.new();sun.rotation_degrees=Vector3(-45,-35,0);sun.light_color=Color("ffdda5");sun.light_energy=1.5;sun.shadow_enabled=true;add_child(sun)
  box(Vector3(0,-0.35,0),Vector3(26,0.7,6),Color("3c4554"),true)
@@ -41,7 +41,7 @@ func _ready():
  label(ui,Vector2(882,35),20,"THE ASHEN SPARRING KNIGHT")
  enemy_health=bar(ui,Vector2(882,72),Color("d78761"))
  hint=label(ui,Vector2(30,570),21,"")
- label(ui,Vector2(30,655),18,"A/D  MOVE     J  SLASH     K  HEAVY     L  GUARD     SPACE  QUICKSTEP     E  HEAL     R  RESET")
+ label(ui,Vector2(30,655),18,"A/D  MOVE     Z  COMBO     X  HEAVY     C  GUARD     V  QUICKSTEP     B  HEAL     R  RESET")
  label(ui,Vector2(30,685),14,"Hold your ground. Spend stamina wisely. Quickstep through attacks.")
 func box(pos:Vector3,size:Vector3,color:Color,solid=false):
  var mesh=MeshInstance3D.new();var cube=BoxMesh.new();cube.size=size;mesh.mesh=cube;mesh.position=pos
@@ -54,7 +54,7 @@ func bar(ui:Node,pos:Vector2,color:Color)->ProgressBar:
  var b=ProgressBar.new();b.position=pos;b.size=Vector2(340,18);b.show_percentage=false
  var style=StyleBoxFlat.new();style.bg_color=color;b.add_theme_stylebox_override("fill",style);ui.add_child(b);return b
 func finish(lost:bool):
- finished=true;notice="YOU FELL — R to try again" if lost else "TRIAL COMPLETE — R to spar again"
+ finished=true;notice="YOU FELL — Recovering… Explore freely, or R to retry" if lost else "TRIAL COMPLETE — Explore freely, or R to spar again"
 func _process(dt):
  if Input.is_action_just_pressed("restart"):get_tree().reload_current_scene();return
  health.value=player.hp;energy.value=player.stamina;enemy_health.value=enemy.hp
