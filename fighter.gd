@@ -8,6 +8,12 @@ var attack_phase=0.0
 var dodge_previous_distance=0.0
 var backstep_motion:Curve
 const CROUCH_GUARD_HOLD="__crouch_guard_hold"
+var dodge_buffer=0.0
+var buffered_dodge_axis=0.0
+var jump_air_velocity=0.0
+var jump_facing=1.0
+var jump_moving=false
+var jump_vertical_motion={}
 var jump_hold_time=0.0
 var jump_flight_start_y=0.0
 var dodge_entry_speed=0.0
@@ -50,6 +56,7 @@ func _ready():
  visual=load("res://assets/knight.glb").instantiate();add_child(visual)
  animator=find_anim(visual)
  cache_backstep_motion()
+ cache_jump_vertical_motion()
  make_animations_in_place()
  build_crouch_guard_hold()
  animator.callback_mode_process=AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_PHYSICS
@@ -67,6 +74,37 @@ func cache_backstep_motion():
    var phase=sample_index/120.0
    var position_value=sk.global_basis*source.position_track_interpolate(track,source.length*phase)
    backstep_motion.add_point(Vector2(phase,origin-position_value.z),0,0,Curve.TANGENT_LINEAR,Curve.TANGENT_LINEAR)
+func cache_jump_vertical_motion():
+ var sk=visual.find_child("Skeleton3D",true,false) as Skeleton3D
+ for clip in ["Moving Jump","Sword And Shield Jump"]:
+  var source=animator.get_animation(clip)
+  var curve=Curve.new();curve.min_value=-4;curve.max_value=4
+  for track in source.get_track_count():
+   if source.track_get_type(track)!=Animation.TYPE_POSITION_3D:continue
+   if not str(source.track_get_path(track)).ends_with(":mixamorig_Hips"):continue
+   var origin=(sk.global_basis*source.position_track_interpolate(track,0)).y
+   for sample_index in range(121):
+    var phase=sample_index/120.0
+    var position_value=sk.global_basis*source.position_track_interpolate(track,source.length*phase)
+    curve.add_point(Vector2(phase,position_value.y-origin),0,0,Curve.TANGENT_LINEAR,Curve.TANGENT_LINEAR)
+  jump_vertical_motion[clip]=curve
+func apply_jump_root_offset():
+ # Keep the supplied poses, but do not add their authored flight arc to physics.
+ var phase=animator.current_animation_position/clip_duration(jump_clip)
+ visual.position.y=-maxf(0,jump_vertical_motion[jump_clip].sample(clampf(phase,0,1)))
+func update_air_steering(axis:float,dt:float):
+ var target=jump_air_velocity
+ var acceleration=2.0
+ if not is_zero_approx(axis):
+  if jump_moving:
+   target=jump_facing*RUN_SPEED if axis*jump_facing>0 else -jump_facing*RUN_SPEED*0.28
+   acceleration=6.0 if axis*jump_facing>0 else 10.0
+  else:
+   target=axis*RUN_SPEED*0.35
+   acceleration=6.0
+ else:target=0
+ jump_air_velocity=move_toward(jump_air_velocity,target,acceleration*dt)
+ velocity.x=jump_air_velocity
 func build_crouch_guard_hold():
  # The supplied idle repeats the lowered pose. Preserve its breathing, offset
  # around the raised-shield pose at the end of the supplied transition.
@@ -122,6 +160,7 @@ func set_crouched(value:bool):
  capsule.height=1.1 if value else 1.8
  body_shape.position.y=capsule.height/2.0
 func start_dodge(axis:float):
+ dodge_buffer=0
  set_crouched(false);shield_raised=false
  dodge_previous_distance=0
  dodge_entry_speed=absf(velocity.x) if signf(velocity.x)==signf(axis) else 0.0
@@ -129,12 +168,16 @@ func start_dodge(axis:float):
   dodge_direction=-facing;dodge_clip="Standing Dodge Backward"
  else:
   dodge_direction=signf(axis);facing=dodge_direction;dodge_clip="Sprinting Forward Roll"
- begin("dodge",0.85 if dodge_clip=="Sprinting Forward Roll" else 1.1)
+ begin("dodge",0.68 if dodge_clip=="Sprinting Forward Roll" else 0.88)
+ play_anim(dodge_clip);animator.seek(0,true)
 func start_jump(axis:float):
  set_crouched(false);shield_raised=false
  jump_clip="Moving Jump" if not is_zero_approx(axis) else "Sword And Shield Jump"
  if not is_zero_approx(axis):facing=signf(axis)
  jump_hold_time=0
+ jump_facing=facing
+ jump_moving=not is_zero_approx(axis)
+ jump_air_velocity=axis*RUN_SPEED
  velocity.y=0
  begin("jump_start",0.12*clip_duration(jump_clip) if jump_clip=="Moving Jump" else 0.23*clip_duration(jump_clip))
  play_anim(jump_clip)
@@ -142,28 +185,52 @@ func start_jump(axis:float):
 func jump_air_state():
  # Preserve chronological source playback across takeoff, flight and landing.
  state="jump_air";timer=0;action_duration=0
- velocity.y=10.8
+ velocity.y=11.5
  jump_flight_start_y=position.y
 func jump_land_state():
+ # Running resumes on contact, rather than waiting for a stationary recovery.
+ if dodge_buffer>0:
+  start_dodge(buffered_dodge_axis)
+  return
+ var axis=Input.get_axis("left","right") if not enemy else 0.0
+ if not is_zero_approx(axis):
+  facing=signf(axis);velocity.x=axis*RUN_SPEED
+  begin("idle",0);play_anim("run",true)
+  return
  state="jump_land"
- animator.play()
- animator.speed_scale=1.1
- timer=maxf(0.08,(clip_duration(jump_clip)-animator.current_animation_position)/1.1)
+ animator.play();animator.speed_scale=1.4
+ timer=maxf(0.06,(clip_duration(jump_clip)-animator.current_animation_position)/1.4)
  action_duration=timer
 func update_jump_air(dt:float):
- var landing_phase=0.89 if jump_clip=="Moving Jump" else 0.80
+ # Stop before the stationary clip opens into its wide landing/idle stance.
+ var landing_phase=0.80 if jump_clip=="Moving Jump" else 0.70
  var landing_time=landing_phase*clip_duration(jump_clip)
  if animator.current_animation_position>=landing_time:
-  animator.pause()
+  animator.pause();apply_jump_root_offset()
   return
  var height=maxf(0,position.y-jump_flight_start_y)
- var remaining=(velocity.y+sqrt(velocity.y*velocity.y+2.0*26.0*height))/26.0
+ var remaining=(velocity.y+sqrt(velocity.y*velocity.y+2.0*32.0*height))/32.0
  var desired=(landing_time-animator.current_animation_position)/maxf(remaining,0.05)
  animator.speed_scale=lerpf(animator.speed_scale,clampf(desired,0.25,1.2),minf(dt*8,1.0))
+ apply_jump_root_offset()
+func start_guard_release():
+ var source_length=clip_duration("Crouch Block Begin")
+ var phase=animator.current_animation_position/source_length if state=="guard_enter" else 1.0
+ phase=clampf(phase,0,1)
+ shield_raised=false
+ begin("guard_exit",maxf(0.04,0.22*phase))
+ last_anim="Crouch Block Begin"
+ animator.speed_scale=source_length/0.22
+ animator.play("Crouch Block Begin",0.04,-1.0,true)
+ animator.seek(source_length*phase,true)
 func start_guard():
+ var resume_position=animator.current_animation_position if state=="guard_exit" else 0.0
  guard_clip="Crouch Block Begin" if crouched else "Shield Block Begin"
  shield_raised=true
- begin("guard_enter",minf(0.22,clip_duration(guard_clip)))
+ begin("guard_enter",maxf(0.04,0.22*(1.0-resume_position/clip_duration(guard_clip))))
+ play_anim(guard_clip)
+ animator.speed_scale=clip_duration(guard_clip)/0.22
+ animator.seek(resume_position,true)
 func find_anim(n:Node)->AnimationPlayer:
  if n is AnimationPlayer:return n
  for c in n.get_children():
@@ -193,6 +260,7 @@ func _physics_process(dt):
  if not foe:return
  timer=maxf(0,timer-dt);cooldown-=dt
  combo_window=maxf(0,combo_window-dt)
+ dodge_buffer=maxf(0,dodge_buffer-dt)
  if hp<=0:
   play_anim("death");velocity=Vector3.ZERO;flash.visible=false
   if not enemy and timer<=0:
@@ -211,13 +279,17 @@ func _physics_process(dt):
  else:
   axis=Input.get_axis("left","right")
   block=Input.is_action_pressed("block")
-  if not block:shield_raised=false
+  if not block and shield_raised and crouched and state in ["crouched","guard_enter"]:
+   start_guard_release()
+  elif not block:shield_raised=false
+  if Input.is_action_just_pressed("dodge"):
+   dodge_buffer=0.4;buffered_dodge_axis=axis
   want_crouch=Input.is_action_pressed("crouch")
   if state=="attack" and Input.is_action_just_pressed("attack"):
    combo_queued=true
   if state in ["idle","crouched"]:
-   if Input.is_action_just_pressed("dodge") and is_on_floor():
-    start_dodge(axis)
+   if dodge_buffer>0 and is_on_floor():
+    start_dodge(buffered_dodge_axis)
    elif Input.is_action_just_pressed("jump") and is_on_floor():
     start_jump(axis)
    elif state=="idle" and Input.is_action_just_pressed("attack"):
@@ -232,7 +304,7 @@ func _physics_process(dt):
    elif state=="crouched" and not want_crouch:
     begin("crouch_exit",0.18)
   if state in ["idle","crouched"] and block and not shield_raised:start_guard()
-  if axis!=0 and state in ["idle","crouched","jump_air"] and not block:facing=signf(axis)
+  if axis!=0 and state in ["idle","crouched"] and not block:facing=signf(axis)
  visual.rotation.y=lerp_angle(visual.rotation.y,facing*PI/2,dt*18)
  velocity.x=0
  match state:
@@ -258,16 +330,25 @@ func _physics_process(dt):
    if not block or timer<=0:
     begin("crouched" if crouched else "idle",0)
     if block:play_anim(CROUCH_GUARD_HOLD if crouched else "block idle",true)
+  "guard_exit":
+   if block:start_guard()
+   elif timer<=0:
+    begin("crouched",0)
+    play_anim("Crouch");animator.seek(clip_duration("Crouch"),true);animator.pause()
   "jump_start":
    velocity.x=axis*RUN_SPEED
    if timer<=0:jump_air_state()
   "jump_air":
-   velocity.x=axis*RUN_SPEED
+   update_air_steering(axis,dt)
    jump_hold_time+=dt
    update_jump_air(dt)
   "jump_land":
-   velocity.x=axis*RUN_SPEED
-   if timer<=0:begin("idle",0)
+   if dodge_buffer>0:start_dodge(buffered_dodge_axis)
+   elif not is_zero_approx(axis):
+    facing=signf(axis);velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
+   else:
+    apply_jump_root_offset()
+    if timer<=0:begin("idle",0)
   "windup":
    play_anim("block",false)
    flash.scale=Vector3.ONE*(1.2+sin(timer*22)*0.15)
@@ -297,13 +378,16 @@ func _physics_process(dt):
    else:
     # Match running pace; preserve entry momentum and blend back into a run.
     var speed=RUN_SPEED*1.05
-    if progress<0.12:
-     speed=lerpf(dodge_entry_speed,speed,smoothstep(0,0.12,progress))
+    animator.speed_scale=lerpf(2.1,1.68,smoothstep(0,0.4,progress))
+    if progress<0.08:
+     speed=lerpf(dodge_entry_speed,speed,smoothstep(0,0.08,progress))
     elif progress>0.85:
      var exit_speed=RUN_SPEED if axis*dodge_direction>0 else 0.0
      speed=lerpf(speed,exit_speed,smoothstep(0.85,1.0,progress))
     velocity.x=dodge_direction*speed
-   if timer<=0:begin("idle",0)
+   if timer<=0:
+    if dodge_buffer>0:start_dodge(buffered_dodge_axis)
+    else:begin("idle",0)
   "hurt":
    play_anim(reaction_clip);velocity.x=knockback_direction*(0.3 if "Shield" in reaction_clip else 1.5)
    if timer<=0:
@@ -312,7 +396,7 @@ func _physics_process(dt):
    play_anim("power up")
    if timer<=0:hp=minf(MAX_HEALTH,hp+100);begin("idle",0);arena.notice="Restored 100 health"
  flash.visible=enemy and state=="windup"
- var gravity=14.0 if state=="jump_air" and velocity.y>0 and Input.is_action_pressed("jump") and jump_hold_time<0.22 else 26.0
+ var gravity=24.0 if state=="jump_air" and velocity.y>0 and Input.is_action_pressed("jump") and jump_hold_time<0.16 else 32.0
  velocity.y-=gravity*dt
  move_and_slide();position.z=0;position.x=clampf(position.x,-11.5,11.5)
  if state=="jump_air" and is_on_floor() and velocity.y<=0:jump_land_state()
