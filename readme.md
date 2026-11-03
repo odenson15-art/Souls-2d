@@ -11,7 +11,7 @@ Godot 4.6 2.5D knight training arena: fully 3D models, with gameplay constrained
 | C, held | Raise shield and guard |
 | V + direction | Direction-locked forward roll |
 | V without direction | Standing backward dodge |
-| Space | Jump; hold for a higher jump, tap for a short hop |
+| Space | Jump; tap clears the opponent, hold for a higher jump |
 | S/down arrow, held | Crouch; release to stand |
 | B | Heal 100 HP; three charges |
 | Enter | Animation viewer |
@@ -21,11 +21,13 @@ Both knights have **250 HP**. Heavy attacks and stamina have been removed. Guard
 
 ## Movement and animation timing
 
-Running is 5.5 m/s (previously 3.5). The camera is closer and follows the player. The forward roll uses **Sprinting Forward Roll.fbx**, travels 3.17 metres (75% of the previous 4.23 metres), and locks its direction. Backstep movement stops halfway through its animation, at foot plant, rather than sliding throughout the recovery.
+Running is 5.5 m/s (previously 3.5). The camera is closer and follows the player. The forward roll uses **Sprinting Forward Roll.fbx** at its natural 1.2-second duration. It carries running speed into and out of the roll with blended velocity and pose transitions. Its movement targets the shortened 3.17-metre distance; changing directional input during recovery can alter that slightly. Heading remains locked during the roll. The backward dodge lasts 1.1 seconds, with movement stopping at foot plant rather than sliding throughout recovery.
 
 Slashes play at 2.1× their source speed. Press Z during a swing to queue the next attack. Queued swings transition before the source clip's return-to-idle section, blending into the next wind-up instead of replaying its neutral opening. A press within 0.25 seconds after an unqueued attack also continues the alternating chain.
 
-Jumping starts with grounded anticipation. Physical takeoff follows that pose. Holding Space sustains ascent briefly; releasing it cuts ascent. The jump pose follows physical ascent and descent, and its landing section plays only on contact. The source animation's extra vertical root travel is removed so it does not add another jump on top of physical movement.
+Jumping preserves the complete uploaded Moving Jump and Sword And Shield Jump clips, including their original vertical pose motion. Clips progress chronologically rather than being scrubbed into selected poses. Physical takeoff follows the source anticipation; flight playback stretches to airtime and waits before the landing section if needed. The landing finishes on the ground. A minimum jump clears the 1.8-metre opponent; holding Space produces a higher jump.
+
+Crouching takes 0.15 seconds, standing up 0.18 seconds. Hold S/down and C together: Crouch Block Begin plays once, then Shield Crouch Idle loops for as long as crouch and guard remain held. The attack chaining is unchanged.
 
 ## Animation assignments
 
@@ -54,6 +56,6 @@ There are **69 clips**: 51 from the original Pro Sword and Shield Pack, 14 organ
 
 `arena.gd` creates the arena, camera and HUD. `fighter.gd` handles movement, combat and animation timing. `animation_viewer.gd` provides previews. `assets/knight.glb` combines the supplied knight, textures and animation clips using their shared Mixamo skeleton. Horizontal root travel is removed at runtime. No plugins or external services are needed. Asset rights remain with their creators; the uploads did not include license documents.
 
-Godot 4.6.3 import and focused headless checks passed for combo chaining without idle recovery, roll distance, backstep stop timing, both shield-raise transitions, crouched guard idle, jump anticipation/airborne/landing states, variable jump heights (about 0.43 m tapped and 2.68 m held), and all 69 previews. Interactive rendering and gameplay feel were not manually tested.
+Focused Godot 4.6.3 headless checks exercise real held crouch/guard input through the transition into sustained shield crouch idle, roll velocity continuity from/to running, backstep foot-plant stopping, chronological jump playback and clearance height, and the retained attack seam. Interactive rendering and gameplay feel were not manually tested.
 
 For a cloud shell with a read-only home, set `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `XDG_CACHE_HOME` to writable directories before launching Godot.
