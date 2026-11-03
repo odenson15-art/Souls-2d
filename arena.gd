@@ -5,7 +5,6 @@ var camera:Camera3D
 var hud:Label
 var hint:Label
 var health:ProgressBar
-var energy:ProgressBar
 var enemy_health:ProgressBar
 var notice="Close the distance. Watch for the red wind-up."
 var finished=false
@@ -18,7 +17,7 @@ func bind(action:String,keys:Array):
   var e=InputEventKey.new();e.physical_keycode=k;InputMap.action_add_event(action,e)
 func _ready():
  bind("jump",[KEY_SPACE]);bind("crouch",[KEY_S,KEY_DOWN])
- bind("left",[KEY_A,KEY_LEFT]);bind("right",[KEY_D,KEY_RIGHT]);bind("attack",[KEY_Z]);bind("heavy",[KEY_X]);bind("block",[KEY_C]);bind("dodge",[KEY_V]);bind("heal",[KEY_B]);bind("restart",[KEY_R])
+ bind("left",[KEY_A,KEY_LEFT]);bind("right",[KEY_D,KEY_RIGHT]);bind("attack",[KEY_Z]);bind("block",[KEY_C]);bind("dodge",[KEY_V]);bind("heal",[KEY_B]);bind("restart",[KEY_R])
  var world=WorldEnvironment.new();var env=Environment.new();env.background_mode=Environment.BG_COLOR;env.background_color=Color("101827");env.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR;env.ambient_light_color=Color("9ab4cf");env.ambient_light_energy=0.65;env.tonemap_mode=Environment.TONE_MAPPER_FILMIC;world.environment=env;add_child(world)
  var sun=DirectionalLight3D.new();sun.rotation_degrees=Vector3(-45,-35,0);sun.light_color=Color("ffdda5");sun.light_energy=1.5;sun.shadow_enabled=true;add_child(sun)
  box(Vector3(0,-0.35,0),Vector3(26,0.7,6),Color("3c4554"),true)
@@ -34,16 +33,16 @@ func _ready():
  box(Vector3(0,4,-3.4),Vector3(25,0.6,0.8),Color("293544"))
  player=CharacterBody3D.new();player.set_script(load("res://fighter.gd"));player.position=Vector3(-3,0.1,0);player.arena=self;add_child(player)
  enemy=CharacterBody3D.new();enemy.set_script(load("res://fighter.gd"));enemy.enemy=true;enemy.position=Vector3(3,0.1,0);enemy.arena=self;add_child(enemy);player.foe=enemy;enemy.foe=player
- camera=Camera3D.new();camera.projection=Camera3D.PROJECTION_ORTHOGONAL;camera.size=14;camera.position=Vector3(0,4.3,12);add_child(camera);camera.look_at(Vector3(0,1,0))
+ camera=Camera3D.new();camera.projection=Camera3D.PROJECTION_ORTHOGONAL;camera.size=10.5;camera.position=Vector3(0,4.3,12);add_child(camera);camera.look_at(Vector3(0,1,0))
  var ui=CanvasLayer.new();add_child(ui)
- var panel=ColorRect.new();panel.color=Color(0.025,0.035,0.055,0.9);panel.position=Vector2(24,24);panel.size=Vector2(380,145);ui.add_child(panel)
+ var panel=ColorRect.new();panel.color=Color(0.025,0.035,0.055,0.9);panel.position=Vector2(24,24);panel.size=Vector2(380,120);ui.add_child(panel)
  hud=label(ui,Vector2(42,34),24,"EMBER YARD  /  TRAINING")
- health=bar(ui,Vector2(42,78),Color("e26663"));energy=bar(ui,Vector2(42,104),Color("7fc797"))
- label(ui,Vector2(42,132),16,"HEALTH   /   STAMINA")
+ health=bar(ui,Vector2(42,78),Color("e26663"));health.max_value=player.MAX_HEALTH
+ label(ui,Vector2(42,106),16,"HEALTH")
  label(ui,Vector2(882,35),20,"THE ASHEN SPARRING KNIGHT")
- enemy_health=bar(ui,Vector2(882,72),Color("d78761"))
+ enemy_health=bar(ui,Vector2(882,72),Color("d78761"));enemy_health.max_value=enemy.MAX_HEALTH
  hint=label(ui,Vector2(30,570),21,"")
- label(ui,Vector2(30,655),18,"A/D  MOVE     Z  COMBO     X  HEAVY     C  GUARD     V  QUICKSTEP     B  HEAL     R  RESET")
+ label(ui,Vector2(30,655),18,"A/D  MOVE     Z  COMBO     C  GUARD     V  DODGE     B  HEAL     R  RESET")
  label(ui,Vector2(30,685),14,"SPACE  JUMP     S / ↓  CROUCH     ENTER  ANIMATION VIEWER")
  var viewer=CanvasLayer.new();viewer.set_script(load("res://animation_viewer.gd"));viewer.arena=self;add_child(viewer)
 func box(pos:Vector3,size:Vector3,color:Color,solid=false):
@@ -61,7 +60,7 @@ func finish(lost:bool):
 func _process(dt):
  if previewing:return
  if Input.is_action_just_pressed("restart"):get_tree().reload_current_scene();return
- health.value=player.hp;energy.value=player.stamina;enemy_health.value=enemy.hp
- hint.text=notice+"\n"+str(player.potions)+" healing charges  •  Quickstep costs 22 stamina"
+ health.value=player.hp;enemy_health.value=enemy.hp
+ hint.text=notice+"\n"+str(player.potions)+" healing charges  •  Hold SPACE for a higher jump"
  shake=maxf(0,shake-dt)
- camera.position.x=lerpf(camera.position.x,(player.position.x+enemy.position.x)*0.35,dt*3)+randf_range(-shake,shake)
+ camera.position.x=lerpf(camera.position.x,player.position.x*0.75,dt*3)+randf_range(-shake,shake)

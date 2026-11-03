@@ -1,56 +1,59 @@
 # Ember Yard
 
-A compact Godot 4.6 2.5D sword-and-shield training arena. Fully 3D knights and scenery; movement and melee stay on the side-scrolling X/Y plane.
+Godot 4.6 2.5D knight training arena: fully 3D models, with gameplay constrained to a side-scrolling plane. Open `project.godot` in Godot 4.6 and press **F5**, or run `godot --path .`.
 
-## Play
-
-Open `project.godot` in Godot 4.6 and press **F6** on `arena.tscn`, or **F5** to run the project. From a terminal: `godot --path .`.
+## Controls
 
 | Control | Action |
 | --- | --- |
-| A / D or arrows | Move |
-| Z | Alternating Slash1 → Slash2 → Slash1 combo: press repeatedly (20 stamina per hit) |
-| X | Heavy strike (35 stamina) |
-| C, held | Guard facing forward |
-| V + direction | Invulnerable forward roll, heading locked (22 stamina) |
-| V without direction | Standing backward dodge (22 stamina) |
-| Space | Jump; moving and stationary clips selected automatically |
-| S / down arrow, held | Crouch; release to stand |
-| B | Heal 55 HP; three charges; leaves you exposed |
-| R | Restart the duel |
+| A/D or left/right arrows | Run |
+| Z, repeated presses | Alternating Slash1 / Slash2 combo |
+| C, held | Raise shield and guard |
+| V + direction | Direction-locked forward roll |
+| V without direction | Standing backward dodge |
+| Space | Jump; hold for a higher jump, tap for a short hop |
+| S/down arrow, held | Crouch; release to stand |
+| B | Heal 100 HP; three charges |
+| Enter | Animation viewer |
+| R | Restart duel |
 
-Defeat the sparring knight. A pulsing red ring signals its attack wind-up. Guard reduces incoming damage and consumes stamina; quickstep passes through strikes. Stamina regenerates fastest when your guard is down. Heavy attacks trade recovery time for damage. Restart replenishes both fighters and healing charges. You can pass through the opponent. After victory you may keep exploring; after defeat your knight recovers after the death animation so you can move again. Press R for another duel.
+Both knights have **250 HP**. Heavy attacks and stamina have been removed. Guard reduces frontal damage; back attacks bypass it. The opponent's red ring warns of an attack. You may cross the opponent. After victory, keep exploring; after defeat, your knight recovers after its death animation. R starts a fresh duel.
+
+## Movement and animation timing
+
+Running is 5.5 m/s (previously 3.5). The camera is closer and follows the player. The forward roll uses **Sprinting Forward Roll.fbx**, travels 3.17 metres (75% of the previous 4.23 metres), and locks its direction. Backstep movement stops halfway through its animation, at foot plant, rather than sliding throughout the recovery.
+
+Slashes play at 2.1× their source speed. Press Z during a swing to queue the next attack. Queued swings transition before the source clip's return-to-idle section, blending into the next wind-up instead of replaying its neutral opening. A press within 0.25 seconds after an unqueued attack also continues the alternating chain.
+
+Jumping starts with grounded anticipation. Physical takeoff follows that pose. Holding Space sustains ascent briefly; releasing it cuts ascent. The jump pose follows physical ascent and descent, and its landing section plays only on contact. The source animation's extra vertical root travel is removed so it does not add another jump on top of physical movement.
+
+## Animation assignments
+
+| Situation | Supplied filename |
+| --- | --- |
+| Front hit | Impact.fbx |
+| Frontal hit while guarding | Shield Impact.fbx |
+| Rear hit | Back Impact.fbx |
+| Crouched hit | Crouch Impact.fbx |
+| Crouched frontal guard hit | Crouch Shield Impact.fbx |
+| Forward roll | Sprinting Forward Roll.fbx |
+| No-input dodge | Standing Dodge Backward.fbx |
+| Moving / stationary jump | Moving Jump.fbx / Sword And Shield Jump.fbx |
+| Alternating slashes | Sword And Shield Slash1.fbx / Sword And Shield Slash2.fbx |
+| Crouch / stand | Crouch.fbx / Crouch To Standing.fbx |
+| Raise shield standing / crouched | Shield Block Begin.fbx / Crouch Block Begin.fbx |
+| Crouched shield idle | Shield Crouch Idle.fbx |
 
 ## Animation viewer
 
-Press **Enter** during play to open the scrollable animation menu. The opponent disappears and combat pauses. Click an original FBX filename to perform it on the knight. Use the search field to filter names, Replay to restart, Stop to pause, Loop to repeat, the speed slider for slow motion, Turn to inspect another angle, and Copy name to share your choice. Press Enter again to return to the duel. Previewing does not consume health, stamina, or healing charges.
+Press Enter to pause combat and hide the opponent. Click a filename in the scrollable list to perform it on your knight. Search filters names. Replay, Stop, Loop, speed, Turn, and Copy name help inspect clips and share choices. Enter returns to the duel without consuming health or healing charges.
 
-The viewer includes **65 clips**: the original 51 animations plus all 14 individually uploaded organized files. Organized filenames retain their original capitalization. `Run Attack.fbx` is included for preview; Z always uses the requested alternating slash combo. `X Bot.fbx` is the original pack's reference model rather than another animation. The earlier oversized Pack 2 archive was not imported in full; its separately supplied organized clips are now included.
+There are **69 clips**: 51 from the original Pro Sword and Shield Pack, 14 organized individual uploads, and four later roll/shield uploads. Original filenames are preserved in the viewer. Run Attack and the superseded roll remain available for preview. The earlier oversized Pack 2 archive was not imported in full; separately supplied files are included.
 
-## Requested animation rules
+## Implementation and validation
 
-| Situation | Animation |
-| --- | --- |
-| Normal front hit | Impact.fbx |
-| Front hit while guarding | Shield Impact.fbx |
-| Rear hit (bypasses shield) | Back Impact.fbx |
-| Crouched front hit | Crouch Impact.fbx |
-| Crouched front hit while guarding | Crouch Shield Impact.fbx |
-| V with directional input | Stand To Roll.fbx |
-| V without directional input | Standing Dodge Backward.fbx |
-| Jump with directional input | Moving Jump.fbx |
-| Jump without directional input | Sword And Shield Jump.fbx |
-| First/next alternating attack | Sword And Shield Slash1.fbx / Sword And Shield Slash2.fbx |
-| Enter / exit crouch | Crouch.fbx / Crouch To Standing.fbx |
+`arena.gd` creates the arena, camera and HUD. `fighter.gd` handles movement, combat and animation timing. `animation_viewer.gd` provides previews. `assets/knight.glb` combines the supplied knight, textures and animation clips using their shared Mixamo skeleton. Horizontal root travel is removed at runtime. No plugins or external services are needed. Asset rights remain with their creators; the uploads did not include license documents.
 
-The combo buffers another press during the current slash and accepts a next press within 0.3 seconds after it finishes. Each queued hit costs stamina; if stamina is depleted, the chain stops. A roll's direction and facing are locked until it finishes. A no-input dodge retreats without turning the knight. Guarding requires stamina and a frontal attack; rear hits use Back Impact even if guard is held. Hold C while crouched to guard low. Release S/down to play the stand-up transition.
+Godot 4.6.3 import and focused headless checks passed for combo chaining without idle recovery, roll distance, backstep stop timing, both shield-raise transitions, crouched guard idle, jump anticipation/airborne/landing states, variable jump heights (about 0.43 m tapped and 2.68 m held), and all 69 previews. Interactive rendering and gameplay feel were not manually tested.
 
-## Assets and implementation
-
-`assets/knight.glb` combines the supplied Paladin WProp J Nordstrom knight with 51 original clips and 14 organized clips. Shared Mixamo bone names allow the clips to drive the knight skeleton. World-horizontal hips travel is removed from all clips at runtime for gameplay-controlled movement, retaining vertical pose motion. Movement, heavy strikes, healing, guard idle, crouch guard idle, and death retain the original pack's clips; the requested actions use the named organized clips above.
-
-The arena, lights, HUD, and fighters are created by `arena.gd`; movement, animation and combat are in `fighter.gd`. No plugins or external services are required. Imported materials/textures are from the supplied model. Asset rights remain with their respective creators; the upload did not include license documents.
-
-In a cloud shell with a read-only home directory, set writable `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `XDG_CACHE_HOME` before running Godot. For example, create `/tmp/ember/{data,config,cache}` and set those variables to the corresponding directories.
-
-Validation: Godot 4.6.3 asset import and a focused headless check passed for all 65 previews, the five hit reactions and shield damage rules, alternating buffered slashes, roll direction lock, backward dodge, moving/stationary jump selection, and crouch/stand transitions. Interactive rendering and gameplay feel were not manually tested.
+For a cloud shell with a read-only home, set `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `XDG_CACHE_HOME` to writable directories before launching Godot.
