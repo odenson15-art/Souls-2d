@@ -81,7 +81,9 @@ func build_crouch_guard_hold():
    var raised=transition.rotation_track_interpolate(reference,transition.length)
    for key in hold.track_get_key_count(track):
     var original=hold.track_get_key_value(track,key)
-    hold.track_set_key_value(track,key,(raised*initial.inverse()*original).normalized())
+    var path=str(hold.track_get_path(track))
+    var shield_arm="mixamorig_LeftShoulder" in path or "mixamorig_LeftArm" in path or "mixamorig_LeftForeArm" in path or "mixamorig_LeftHand" in path or "mixamorig_Shield_joint" in path
+    hold.track_set_key_value(track,key,raised if shield_arm else (raised*initial.inverse()*original).normalized())
   elif hold.track_get_type(track)==Animation.TYPE_POSITION_3D:
    var offset=transition.position_track_interpolate(reference,transition.length)-hold.position_track_interpolate(track,0)
    for key in hold.track_get_key_count(track):
