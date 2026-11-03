@@ -17,6 +17,7 @@ func bind(action:String,keys:Array):
  for k in keys:
   var e=InputEventKey.new();e.physical_keycode=k;InputMap.action_add_event(action,e)
 func _ready():
+ bind("jump",[KEY_SPACE]);bind("crouch",[KEY_S,KEY_DOWN])
  bind("left",[KEY_A,KEY_LEFT]);bind("right",[KEY_D,KEY_RIGHT]);bind("attack",[KEY_Z]);bind("heavy",[KEY_X]);bind("block",[KEY_C]);bind("dodge",[KEY_V]);bind("heal",[KEY_B]);bind("restart",[KEY_R])
  var world=WorldEnvironment.new();var env=Environment.new();env.background_mode=Environment.BG_COLOR;env.background_color=Color("101827");env.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR;env.ambient_light_color=Color("9ab4cf");env.ambient_light_energy=0.65;env.tonemap_mode=Environment.TONE_MAPPER_FILMIC;world.environment=env;add_child(world)
  var sun=DirectionalLight3D.new();sun.rotation_degrees=Vector3(-45,-35,0);sun.light_color=Color("ffdda5");sun.light_energy=1.5;sun.shadow_enabled=true;add_child(sun)
@@ -43,7 +44,7 @@ func _ready():
  enemy_health=bar(ui,Vector2(882,72),Color("d78761"))
  hint=label(ui,Vector2(30,570),21,"")
  label(ui,Vector2(30,655),18,"A/D  MOVE     Z  COMBO     X  HEAVY     C  GUARD     V  QUICKSTEP     B  HEAL     R  RESET")
- label(ui,Vector2(30,685),14,"ENTER  ANIMATION VIEWER  •  Hold your ground. Spend stamina wisely.")
+ label(ui,Vector2(30,685),14,"SPACE  JUMP     S / ↓  CROUCH     ENTER  ANIMATION VIEWER")
  var viewer=CanvasLayer.new();viewer.set_script(load("res://animation_viewer.gd"));viewer.arena=self;add_child(viewer)
 func box(pos:Vector3,size:Vector3,color:Color,solid=false):
  var mesh=MeshInstance3D.new();var cube=BoxMesh.new();cube.size=size;mesh.mesh=cube;mesh.position=pos

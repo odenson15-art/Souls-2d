@@ -44,8 +44,9 @@ func _ready():
  speed.value_changed.connect(func(value):arena.player.animator.speed_scale=value;rate.text="%.2f×"%value)
  for clip in arena.player.animator.get_animation_list():
   if clip=="RESET":continue
-  var file=clip if clip.begins_with("draw ") or clip.begins_with("sheath ") else "sword and shield "+clip
-  entries.append({"clip":clip,"file":file+".fbx","pack":"Pro Sword and Shield Pack"})
+  var organized=clip[0]==clip[0].to_upper()
+  var file=clip if organized or clip.begins_with("draw ") or clip.begins_with("sheath ") else "sword and shield "+clip
+  entries.append({"clip":clip,"file":file+".fbx","pack":"Organized animations" if organized else "Pro Sword and Shield Pack"})
  entries.sort_custom(func(a,b):return a.file.naturalnocasecmp_to(b.file)<0)
  rebuild_list("");panel.hide()
 
@@ -92,6 +93,7 @@ func toggle():
   arena.camera.transform=saved_camera;arena.camera.size=saved_camera_size
   arena.player.begin("dead" if arena.player.hp<=0 else "idle",2.6 if arena.player.hp<=0 else 0)
   arena.player.velocity=Vector3.ZERO
+  arena.player.set_crouched(false)
   arena.enemy.show();arena.player.set_physics_process(saved_player_physics);arena.enemy.set_physics_process(saved_enemy_physics)
 
 func select_clip(clip:String):
