@@ -6,6 +6,10 @@ const BODY_RADIUS=0.42
 const MIN_BODY_DISTANCE=BODY_RADIUS*2.0
 const MELEE_REACH=1.65
 const ENEMY_APPROACH_DISTANCE=1.25
+const HIT_PUSH_SPEED=3.0
+const HIT_PUSH_DRAG=18.0
+const TURN_RATE=1.85
+var hit_push_velocity=0.0
 const ATTACK_RATE=2.1
 var hp=MAX_HEALTH
 var attack_phase=0.0
@@ -28,7 +32,7 @@ const ROLL_FOLLOW_RECOVERY="__roll_followup_recover"
 const ROLL_FOLLOW_START=0.2
 const ROLL_FOLLOW_END=2.0
 const ROLL_FOLLOW_HIT=1.2666667
-const TURN_SOURCE="Sword And Shield 180 Turn (1)"
+const TURN_SOURCE="Sword And Shield 180 Turn (3)"
 const TURN_CLIP="__running_turn"
 const LAND_STOP_CLIP="__landing_stop"
 var turn_yaw:Curve
@@ -186,7 +190,7 @@ func start_turn():
  turn_start_yaw=facing*PI/2
  visual.rotation.y=turn_start_yaw
  attack_previous_distance=0
- begin("turn",clip_duration(TURN_SOURCE)/1.35)
+ begin("turn",clip_duration(TURN_SOURCE)/TURN_RATE)
  play_anim(TURN_CLIP);animator.seek(0,true)
 func correct_jump_contact():
  var active=state in ["jump_start","jump_air","jump_land"] or landing_contact_time>0
@@ -462,6 +466,7 @@ func play_anim(key:String,loop=false):
  animator.play(key,blend)
 func begin(s:String,t:float):
  state=s;timer=t;action_duration=t;struck=false;last_anim=""
+ if s!="hurt":hit_push_velocity=0
  if s in ["attack","dodge","jump_start","heal","crouch_exit"]:shield_raised=false
  jump_visual_base=0;visual.position.y=0
 func _physics_process(dt):
@@ -665,7 +670,9 @@ func _physics_process(dt):
      begin("idle",0)
      play_anim("idle" if is_zero_approx(axis) else "run",true)
   "hurt":
-   play_anim(reaction_clip);velocity.x=0
+   play_anim(reaction_clip)
+   velocity.x=hit_push_velocity
+   hit_push_velocity=move_toward(hit_push_velocity,0,HIT_PUSH_DRAG*dt)
    if timer<=0:
     begin("crouched" if crouched else "idle",0)
   "heal":
@@ -689,7 +696,12 @@ func hurt(damage:float,source:Node):
   hp-=damage
   reaction_clip="Back Impact" if behind else ("Crouch Impact" if crouched else "Impact")
   arena.notice="Heavy strike!" if damage>25 else "Steel meets steel"
- velocity.x=0
+ var push_direction=signf(position.x-source.position.x)
+ if is_zero_approx(push_direction):push_direction=source.facing
+ var push_speed=1.0 if guarding else HIT_PUSH_SPEED
+ if crouched:push_speed*=0.7
+ hit_push_velocity=push_direction*push_speed
+ velocity.x=hit_push_velocity
  attack_after_turn=false;turn_after_standing=false;turn_attack_presses=0
  combo_presses=0;roll_attack_window=0;roll_attack_buffer=0
  begin("hurt",clip_duration(reaction_clip))

@@ -33,7 +33,7 @@ func _ready():
  box(Vector3(0,4,-3.4),Vector3(25,0.6,0.8),Color("293544"))
  player=CharacterBody3D.new();player.set_script(load("res://fighter.gd"));player.position=Vector3(-3,0.1,0);player.arena=self;add_child(player)
  enemy=CharacterBody3D.new();enemy.set_script(load("res://fighter.gd"));enemy.enemy=true;enemy.position=Vector3(3,0.1,0);enemy.arena=self;add_child(enemy);player.foe=enemy;enemy.foe=player
- camera=Camera3D.new();camera.projection=Camera3D.PROJECTION_ORTHOGONAL;camera.size=9.0;camera.position=Vector3(0,4.3,12);add_child(camera);camera.look_at(Vector3(0,1,0))
+ camera=Camera3D.new();camera.projection=Camera3D.PROJECTION_ORTHOGONAL;camera.size=7.5;camera.position=Vector3(0,4.3,12);add_child(camera);camera.look_at(Vector3(0,1,0))
  var ui=CanvasLayer.new();add_child(ui)
  var panel=ColorRect.new();panel.color=Color(0.025,0.035,0.055,0.9);panel.position=Vector2(24,24);panel.size=Vector2(380,120);ui.add_child(panel)
  hud=label(ui,Vector2(42,34),24,"EMBER YARD  /  TRAINING")
