@@ -27,9 +27,15 @@ var struck=false
 var cooldown=1.2
 var potions=3
 var combo_index=0
-var combo_queued=false
-var combo_window=0.0
-const COMBO_CLIPS=["Sword And Shield Slash1", "Sword And Shield Slash2"]
+var combo_presses=0
+const PLAYER_COMBO_RATE=1.8
+const COMBO_SOURCE="One Hand Sword Combo"
+const COMBO_STARTS=[0.1666667,1.4,2.4333333]
+const COMBO_ENDS=[1.4,2.4333333,3.4]
+const COMBO_STRIKES=[0.9666667,1.9333333,2.9666667]
+const COMBO_CLIPS=["__combo_1","__combo_2","__combo_3"]
+const COMBO_RECOVERIES=["__combo_recover_1","__combo_recover_2","__combo_recover_3"]
+const ENEMY_ATTACK_CLIP="Sword And Shield Slash1"
 var action_duration=0.0
 var crouched=false
 var dodge_direction=1.0
@@ -59,6 +65,7 @@ func _ready():
  cache_jump_vertical_motion()
  make_animations_in_place()
  build_crouch_guard_hold()
+ build_attack_stages()
  animator.callback_mode_process=AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_PHYSICS
  flash=MeshInstance3D.new();var ring=TorusMesh.new();ring.inner_radius=0.38;ring.outer_radius=0.45;flash.mesh=ring;flash.position.y=0.04
  var mat=StandardMaterial3D.new();mat.albedo_color=Color(0.9,0.23,0.08) if enemy else Color(0.2,0.8,1);mat.emission_enabled=true;mat.emission=mat.albedo_color;flash.material_override=mat;add_child(flash)
@@ -148,13 +155,64 @@ func make_animations_in_place():
      animation.track_set_key_value(track,key,basis.inverse()*value)
 func clip_duration(key:String, fallback:float=0.5)->float:
  return maxf(animator.get_animation(key).length,0.1) if animator.has_animation(key) else fallback
-func start_slash(chained=false):
- combo_queued=false
- combo_window=0
- attack_phase=([0.18,0.24][combo_index] if chained else 0.0)
- begin("attack",(1.0-attack_phase)*clip_duration(COMBO_CLIPS[combo_index])/ATTACK_RATE)
- play_anim(COMBO_CLIPS[combo_index])
- animator.seek(attack_phase*clip_duration(COMBO_CLIPS[combo_index]),true)
+func sample_transform_track(animation:Animation,track:int,time:float):
+ match animation.track_get_type(track):
+  Animation.TYPE_POSITION_3D:return animation.position_track_interpolate(track,time)
+  Animation.TYPE_ROTATION_3D:return animation.rotation_track_interpolate(track,time)
+  Animation.TYPE_SCALE_3D:return animation.scale_track_interpolate(track,time)
+ return null
+func slice_animation(source:Animation,start:float,end:float)->Animation:
+ var result=Animation.new();result.length=end-start
+ for track in source.get_track_count():
+  var type=source.track_get_type(track)
+  if type not in [Animation.TYPE_POSITION_3D,Animation.TYPE_ROTATION_3D,Animation.TYPE_SCALE_3D]:continue
+  var copy=result.add_track(type)
+  result.track_set_path(copy,source.track_get_path(track))
+  result.track_set_interpolation_type(copy,source.track_get_interpolation_type(track))
+  result.track_insert_key(copy,0,sample_transform_track(source,track,start))
+  for key in source.track_get_key_count(track):
+   var time=source.track_get_key_time(track,key)
+   if time>start and time<end:result.track_insert_key(copy,time-start,source.track_get_key_value(track,key))
+  result.track_insert_key(copy,result.length,sample_transform_track(source,track,end))
+ return result
+func make_attack_recovery(source:Animation,end:float,duration:float)->Animation:
+ var idle=animator.get_animation("idle")
+ var recovery=Animation.new();recovery.length=duration
+ for track in source.get_track_count():
+  var type=source.track_get_type(track)
+  if type not in [Animation.TYPE_POSITION_3D,Animation.TYPE_ROTATION_3D,Animation.TYPE_SCALE_3D]:continue
+  var path=source.track_get_path(track)
+  var idle_track=idle.find_track(path,type)
+  var from_pose=sample_transform_track(source,track,end)
+  var to_pose=sample_transform_track(idle,idle_track,0) if idle_track>=0 else from_pose
+  var copy=recovery.add_track(type);recovery.track_set_path(copy,path)
+  for step in range(9):
+   var phase=step/8.0
+   var weight=smoothstep(0,1,phase)
+   var pose=from_pose.slerp(to_pose,weight) if type==Animation.TYPE_ROTATION_3D else from_pose.lerp(to_pose,weight)
+   recovery.track_insert_key(copy,phase*duration,pose)
+ return recovery
+func build_attack_stages():
+ var source=animator.get_animation(COMBO_SOURCE)
+ var library=animator.get_animation_library("")
+ for stage in range(3):
+  library.add_animation(COMBO_CLIPS[stage],slice_animation(source,COMBO_STARTS[stage],COMBO_ENDS[stage]))
+  var recovery:Animation
+  if stage<2:recovery=make_attack_recovery(source,COMBO_ENDS[stage],0.28 if stage==0 else 0.32)
+  else:recovery=slice_animation(source,COMBO_ENDS[stage],minf(4.1666667,source.length))
+  library.add_animation(COMBO_RECOVERIES[stage],recovery)
+func start_slash():
+ attack_phase=0
+ var clip=ENEMY_ATTACK_CLIP if enemy else COMBO_CLIPS[combo_index]
+ var rate=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
+ begin("attack",clip_duration(clip)/rate)
+ play_anim(clip)
+ animator.seek(0,true)
+func start_attack_recovery():
+ var clip=COMBO_RECOVERIES[combo_index]
+ var rate=PLAYER_COMBO_RATE if combo_index==2 else 1.0
+ begin("attack_recover",clip_duration(clip)/rate)
+ play_anim(clip)
 func set_crouched(value:bool):
  crouched=value
  capsule.height=1.1 if value else 1.8
@@ -244,11 +302,12 @@ func play_anim(key:String,loop=false):
  var animation=animator.get_animation(key)
  animation.loop_mode=Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
  animator.speed_scale=1.0
- if state in ["heal","hurt","dodge","crouch_enter","crouch_exit","guard_enter"]:
+ if state in ["heal","hurt","dodge","crouch_enter","crouch_exit","guard_enter","attack_recover"]:
   animator.speed_scale=animation.length/maxf(action_duration,0.1)
- if state=="attack":animator.speed_scale=ATTACK_RATE
+ if state=="attack":animator.speed_scale=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
  elif key=="run":animator.speed_scale=1.35
- var blend=0.10 if state=="attack" else 0.06
+ var blend=0.03 if state=="attack" else 0.06
+ if state=="attack_recover":blend=0.02
  if state=="dodge":blend=0.10 if dodge_clip=="Sprinting Forward Roll" else 0.04
  elif animator.current_animation=="Sprinting Forward Roll":blend=0.12
  animator.play(key,blend)
@@ -259,7 +318,6 @@ func begin(s:String,t:float):
 func _physics_process(dt):
  if not foe:return
  timer=maxf(0,timer-dt);cooldown-=dt
- combo_window=maxf(0,combo_window-dt)
  dodge_buffer=maxf(0,dodge_buffer-dt)
  if hp<=0:
   play_anim("death");velocity=Vector3.ZERO;flash.visible=false
@@ -285,8 +343,10 @@ func _physics_process(dt):
   if Input.is_action_just_pressed("dodge"):
    dodge_buffer=0.4;buffered_dodge_axis=axis
   want_crouch=Input.is_action_pressed("crouch")
-  if state=="attack" and Input.is_action_just_pressed("attack"):
-   combo_queued=true
+  if Input.is_action_just_pressed("attack"):
+   if state=="attack":combo_presses=mini(combo_presses+1,2-combo_index)
+   elif state=="attack_recover" and combo_index<2:
+    combo_index+=1;start_slash()
   if state in ["idle","crouched"]:
    if dodge_buffer>0 and is_on_floor():
     start_dodge(buffered_dodge_axis)
@@ -294,9 +354,8 @@ func _physics_process(dt):
     start_jump(axis)
    elif state=="idle" and Input.is_action_just_pressed("attack"):
     if not is_zero_approx(axis):facing=signf(axis)
-    var chained=combo_window>0
-    combo_index=1-combo_index if chained else 0
-    start_slash(chained)
+    combo_index=0;combo_presses=0
+    start_slash()
    elif state=="idle" and Input.is_action_just_pressed("heal") and potions>0:
     potions-=1;begin("heal",1.3)
    elif state=="idle" and want_crouch and is_on_floor():
@@ -354,18 +413,24 @@ func _physics_process(dt):
    flash.scale=Vector3.ONE*(1.2+sin(timer*22)*0.15)
    if timer<=0:combo_index=0;start_slash()
   "attack":
-   play_anim(COMBO_CLIPS[combo_index])
-   attack_phase+=dt*ATTACK_RATE/clip_duration(COMBO_CLIPS[combo_index])
-   if attack_phase>=0.42 and not struck:
+   var clip=ENEMY_ATTACK_CLIP if enemy else COMBO_CLIPS[combo_index]
+   var rate=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
+   play_anim(clip)
+   attack_phase+=dt*rate
+   var hit_time=clip_duration(clip)*0.42 if enemy else COMBO_STRIKES[combo_index]-COMBO_STARTS[combo_index]
+   if attack_phase>=hit_time and not struck:
     struck=true
     if absf(foe.position.x-position.x)<2.25 and absf(foe.position.y-position.y)<1.2 and (foe.position.x-position.x)*facing>0:
      foe.hurt(22,self)
-   # Chain out before the authored return-to-idle, into the next wind-up.
-   var chain_cut=[0.66,0.76][combo_index]
-   if not enemy and combo_queued and attack_phase>=chain_cut:
-    combo_index=1-combo_index;start_slash(true)
-   elif timer<=0:
-    combo_window=0.25;combo_queued=false;begin("idle",0);cooldown=1.2
+   if timer<=0:
+    if enemy:begin("idle",0);cooldown=1.2
+    elif combo_presses>0 and combo_index<2:
+     combo_presses-=1;combo_index+=1;start_slash()
+    else:start_attack_recovery()
+  "attack_recover":
+   play_anim(COMBO_RECOVERIES[combo_index])
+   if timer<=0:
+    combo_presses=0;combo_index=0;begin("idle",0)
   "dodge":
    play_anim(dodge_clip)
    var progress=1.0-timer/action_duration
@@ -414,7 +479,7 @@ func hurt(damage:float,source:Node):
   reaction_clip="Back Impact" if behind else ("Crouch Impact" if crouched else "Impact")
   arena.notice="Heavy strike!" if damage>25 else "Steel meets steel"
  knockback_direction=signf(position.x-source.position.x)
- combo_queued=false;combo_window=0
+ combo_presses=0
  begin("hurt",clip_duration(reaction_clip))
  arena.shake=0.13
  if hp<=0:hp=0;set_crouched(false);begin("dead",2.6);arena.finish(not enemy)
