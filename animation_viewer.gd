@@ -43,7 +43,7 @@ func _ready():
  var rate=Label.new();rate.text="1.00×";speed_row.add_child(rate)
  speed.value_changed.connect(func(value):arena.player.animator.speed_scale=value;rate.text="%.2f×"%value)
  for clip in arena.player.animator.get_animation_list():
-  if clip=="RESET":continue
+  if clip=="RESET" or clip.begins_with("__"):continue
   var organized=clip[0]==clip[0].to_upper()
   var file=clip if organized or clip.begins_with("draw ") or clip.begins_with("sheath ") else "sword and shield "+clip
   entries.append({"clip":clip,"file":file+".fbx","pack":"Organized animations" if organized else "Pro Sword and Shield Pack"})

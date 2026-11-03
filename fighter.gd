@@ -6,6 +6,8 @@ const ATTACK_RATE=2.1
 var hp=MAX_HEALTH
 var attack_phase=0.0
 var dodge_previous_distance=0.0
+var backstep_motion:Curve
+const CROUCH_GUARD_HOLD="__crouch_guard_hold"
 var jump_hold_time=0.0
 var jump_flight_start_y=0.0
 var dodge_entry_speed=0.0
@@ -47,9 +49,45 @@ func _ready():
  capsule=cap;body_shape=shape
  visual=load("res://assets/knight.glb").instantiate();add_child(visual)
  animator=find_anim(visual)
+ cache_backstep_motion()
  make_animations_in_place()
+ build_crouch_guard_hold()
+ animator.callback_mode_process=AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_PHYSICS
  flash=MeshInstance3D.new();var ring=TorusMesh.new();ring.inner_radius=0.38;ring.outer_radius=0.45;flash.mesh=ring;flash.position.y=0.04
  var mat=StandardMaterial3D.new();mat.albedo_color=Color(0.9,0.23,0.08) if enemy else Color(0.2,0.8,1);mat.emission_enabled=true;mat.emission=mat.albedo_color;flash.material_override=mat;add_child(flash)
+func cache_backstep_motion():
+ var sk=visual.find_child("Skeleton3D",true,false) as Skeleton3D
+ var source=animator.get_animation("Standing Dodge Backward")
+ backstep_motion=Curve.new();backstep_motion.min_value=-1;backstep_motion.max_value=4
+ for track in source.get_track_count():
+  if source.track_get_type(track)!=Animation.TYPE_POSITION_3D:continue
+  if not str(source.track_get_path(track)).ends_with(":mixamorig_Hips"):continue
+  var origin=(sk.global_basis*source.position_track_interpolate(track,0)).z
+  for sample_index in range(121):
+   var phase=sample_index/120.0
+   var position_value=sk.global_basis*source.position_track_interpolate(track,source.length*phase)
+   backstep_motion.add_point(Vector2(phase,origin-position_value.z),0,0,Curve.TANGENT_LINEAR,Curve.TANGENT_LINEAR)
+func build_crouch_guard_hold():
+ # The supplied idle repeats the lowered pose. Preserve its breathing, offset
+ # around the raised-shield pose at the end of the supplied transition.
+ var source=animator.get_animation("Shield Crouch Idle")
+ var transition=animator.get_animation("Crouch Block Begin")
+ var hold=source.duplicate(true)
+ for track in hold.get_track_count():
+  var reference=transition.find_track(hold.track_get_path(track),hold.track_get_type(track))
+  if reference<0:continue
+  if hold.track_get_type(track)==Animation.TYPE_ROTATION_3D:
+   var initial=hold.rotation_track_interpolate(track,0)
+   var raised=transition.rotation_track_interpolate(reference,transition.length)
+   for key in hold.track_get_key_count(track):
+    var original=hold.track_get_key_value(track,key)
+    hold.track_set_key_value(track,key,(raised*initial.inverse()*original).normalized())
+  elif hold.track_get_type(track)==Animation.TYPE_POSITION_3D:
+   var offset=transition.position_track_interpolate(reference,transition.length)-hold.position_track_interpolate(track,0)
+   for key in hold.track_get_key_count(track):
+    hold.track_set_key_value(track,key,hold.track_get_key_value(track,key)+offset)
+ hold.loop_mode=Animation.LOOP_LINEAR
+ animator.get_animation_library("").add_animation(CROUCH_GUARD_HOLD,hold)
 func make_animations_in_place():
  # FBX hips axes differ from the scene: local Y is forward travel.
  # Remove world-horizontal translation while retaining vertical pose motion.
@@ -89,7 +127,7 @@ func start_dodge(axis:float):
   dodge_direction=-facing;dodge_clip="Standing Dodge Backward"
  else:
   dodge_direction=signf(axis);facing=dodge_direction;dodge_clip="Sprinting Forward Roll"
- begin("dodge",1.2 if dodge_clip=="Sprinting Forward Roll" else 1.1)
+ begin("dodge",0.85 if dodge_clip=="Sprinting Forward Roll" else 1.1)
 func start_jump(axis:float):
  set_crouched(false);shield_raised=false
  jump_clip="Moving Jump" if not is_zero_approx(axis) else "Sword And Shield Jump"
@@ -142,7 +180,8 @@ func play_anim(key:String,loop=false):
  if state=="attack":animator.speed_scale=ATTACK_RATE
  elif key=="run":animator.speed_scale=1.35
  var blend=0.10 if state=="attack" else 0.06
- if state=="dodge" or animator.current_animation=="Sprinting Forward Roll":blend=0.16
+ if state=="dodge":blend=0.10 if dodge_clip=="Sprinting Forward Roll" else 0.04
+ elif animator.current_animation=="Sprinting Forward Roll":blend=0.12
  animator.play(key,blend)
 func begin(s:String,t:float):
  state=s;timer=t;action_duration=t;struck=false;last_anim=""
@@ -204,7 +243,7 @@ func _physics_process(dt):
   "crouched":
    # Keep the final crouch pose; a standing guard must not replace it.
    if block:
-    play_anim("Shield Crouch Idle",true)
+    play_anim(CROUCH_GUARD_HOLD,true)
    elif last_anim!="Crouch":
     play_anim("Crouch")
     animator.seek(animator.get_animation("Crouch").length,true);animator.pause()
@@ -216,7 +255,7 @@ func _physics_process(dt):
    velocity.x=0 if crouched else axis*1.8
    if not block or timer<=0:
     begin("crouched" if crouched else "idle",0)
-    if block:play_anim("Shield Crouch Idle" if crouched else "block idle",true)
+    if block:play_anim(CROUCH_GUARD_HOLD if crouched else "block idle",true)
   "jump_start":
    velocity.x=axis*RUN_SPEED
    if timer<=0:jump_air_state()
@@ -249,19 +288,18 @@ func _physics_process(dt):
    var progress=1.0-timer/action_duration
    var backstep=dodge_clip=="Standing Dodge Backward"
    if backstep:
-    var u=clampf((progress-0.18)/(0.50-0.18),0,1)
-    var distance=1.35*smoothstep(0,1,u)
+    # Use the source root travel, with the same clock as the animation.
+    var distance=backstep_motion.sample(clampf(progress,0,1))
     velocity.x=dodge_direction*(distance-dodge_previous_distance)/dt
     dodge_previous_distance=distance
    else:
-    # Carry running momentum into and out of the roll instead of stopping.
-    var exit_speed=RUN_SPEED if axis*dodge_direction>0 else 0.0
-    var in_time=action_duration*0.15
-    var out_time=action_duration*0.20
-    var cruise=maxf(0,(3.16875-(dodge_entry_speed*in_time+exit_speed*out_time)*0.5)/(action_duration-(in_time+out_time)*0.5))
-    var speed=cruise
-    if progress<0.15:speed=lerpf(dodge_entry_speed,cruise,smoothstep(0,0.15,progress))
-    elif progress>0.80:speed=lerpf(cruise,exit_speed,smoothstep(0.80,1.0,progress))
+    # Match running pace; preserve entry momentum and blend back into a run.
+    var speed=RUN_SPEED*1.05
+    if progress<0.12:
+     speed=lerpf(dodge_entry_speed,speed,smoothstep(0,0.12,progress))
+    elif progress>0.85:
+     var exit_speed=RUN_SPEED if axis*dodge_direction>0 else 0.0
+     speed=lerpf(speed,exit_speed,smoothstep(0.85,1.0,progress))
     velocity.x=dodge_direction*speed
    if timer<=0:begin("idle",0)
   "hurt":
