@@ -8,8 +8,9 @@ const MELEE_REACH=1.65
 const ENEMY_APPROACH_DISTANCE=1.25
 const HIT_PUSH_SPEED=3.0
 const HIT_PUSH_DRAG=18.0
-const TURN_RATE=1.85
 var hit_push_velocity=0.0
+var roll_phasing=false
+const ATTACK_BUFFER_WINDOW=0.35
 const ATTACK_RATE=2.1
 var hp=MAX_HEALTH
 var attack_phase=0.0
@@ -32,15 +33,7 @@ const ROLL_FOLLOW_RECOVERY="__roll_followup_recover"
 const ROLL_FOLLOW_START=0.2
 const ROLL_FOLLOW_END=2.0
 const ROLL_FOLLOW_HIT=1.2666667
-const TURN_SOURCE="Sword And Shield 180 Turn (3)"
-const TURN_CLIP="__running_turn"
 const LAND_STOP_CLIP="__landing_stop"
-var turn_yaw:Curve
-var turn_start_yaw=0.0
-var turn_from_facing=1.0
-var turn_after_standing=false
-var attack_after_turn=false
-var turn_attack_presses=0
 var jump_visual_base=0.0
 var landing_contact_time=0.0
 const ROLL_ATTACK_HIT=0.7333333
@@ -102,12 +95,10 @@ func _ready():
  cache_backstep_motion()
  cache_jump_vertical_motion()
  cache_attack_motion()
- cache_turn_yaw()
  make_animations_in_place()
  build_crouch_guard_hold()
  build_attack_stages()
  build_roll_clips()
- build_turn_clip()
  animator.callback_mode_process=AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_PHYSICS
  animator.mixer_applied.connect(correct_jump_contact)
  flash=MeshInstance3D.new();var ring=TorusMesh.new();ring.inner_radius=0.38;ring.outer_radius=0.45;flash.mesh=ring;flash.position.y=0.04
@@ -140,7 +131,7 @@ func cache_jump_vertical_motion():
   jump_vertical_motion[clip]=curve
 func cache_attack_motion():
  var sk=visual.find_child("Skeleton3D",true,false) as Skeleton3D
- for clip in [COMBO_SOURCE,ROLL_ATTACK_SOURCE,ROLL_FOLLOW_SOURCE,TURN_SOURCE]:
+ for clip in [COMBO_SOURCE,ROLL_ATTACK_SOURCE,ROLL_FOLLOW_SOURCE]:
   var source=animator.get_animation(clip)
   var curve=Curve.new();curve.min_value=-20;curve.max_value=20
   for track in source.get_track_count():
@@ -152,46 +143,24 @@ func cache_attack_motion():
     var position_value=sk.global_basis*source.position_track_interpolate(track,source.length*phase)
     curve.add_point(Vector2(phase,position_value.z-origin),0,0,Curve.TANGENT_LINEAR,Curve.TANGENT_LINEAR)
   attack_motion[clip]=curve
-func cache_turn_yaw():
- var sk=visual.find_child("Skeleton3D",true,false) as Skeleton3D
- var source=animator.get_animation(TURN_SOURCE)
- var axes=sk.global_basis.orthonormalized()
- turn_yaw=Curve.new();turn_yaw.min_value=-8;turn_yaw.max_value=8
- for track in source.get_track_count():
-  if source.track_get_type(track)!=Animation.TYPE_ROTATION_3D or not str(source.track_get_path(track)).ends_with(":mixamorig_Hips"):continue
-  var initial=source.rotation_track_interpolate(track,0)
-  var previous=0.0
-  for i in range(181):
-   var phase=i/180.0
-   var q=source.rotation_track_interpolate(track,source.length*phase)
-   var delta=axes*Basis(q*initial.inverse())*axes.inverse()
-   var angle=atan2(delta.z.x,delta.z.z)
-   if i>0:angle=previous+wrapf(angle-previous,-PI,PI)
-   turn_yaw.add_point(Vector2(phase,angle),0,0,Curve.TANGENT_LINEAR,Curve.TANGENT_LINEAR)
-   previous=angle
-func build_turn_clip():
- var source=animator.get_animation(TURN_SOURCE).duplicate(true)
- var axes=skeleton.global_basis.orthonormalized()
- for track in source.get_track_count():
-  if source.track_get_type(track)!=Animation.TYPE_ROTATION_3D or not str(source.track_get_path(track)).ends_with(":mixamorig_Hips"):continue
-  for key in source.track_get_key_count(track):
-   var phase=source.track_get_key_time(track,key)/source.length
-   var parent_yaw=(axes.inverse()*Basis(Vector3.UP,turn_yaw.sample(phase))*axes).get_rotation_quaternion()
-   var q=source.track_get_key_value(track,key)
-   source.track_set_key_value(track,key,(parent_yaw.inverse()*q).normalized())
- animator.get_animation_library("").add_animation(TURN_CLIP,source)
-func start_ground_reversal():
- if crouched:
-  turn_after_standing=true
-  begin("crouch_exit",0.18)
- else:start_turn()
-func start_turn():
- turn_from_facing=facing
- turn_start_yaw=facing*PI/2
- visual.rotation.y=turn_start_yaw
- attack_previous_distance=0
- begin("turn",clip_duration(TURN_SOURCE)/TURN_RATE)
- play_anim(TURN_CLIP);animator.seek(0,true)
+func max_combo_stage()->int:
+ # Dodge attack is a two-hit branch; standing combo keeps its three swings.
+ return 1 if combo_roll_opener else 2
+func set_roll_phasing(enabled:bool):
+ if roll_phasing==enabled:return
+ roll_phasing=enabled
+ if enabled:
+  collision_layer=0;collision_mask=1
+ else:
+  # Restore only this knight to a safe side if a roll ends within the foe.
+  if foe and foe.hp>0 and position.y<foe.position.y+foe.capsule.height and foe.position.y<position.y+capsule.height:
+   if absf(position.x-foe.position.x)<MIN_BODY_DISTANCE+0.002:
+    var side=signf(position.x-foe.position.x)
+    if is_zero_approx(side):side=dodge_direction
+    var target=foe.position.x+side*(MIN_BODY_DISTANCE+0.002)
+    if target<-11.5 or target>11.5:target=foe.position.x-side*(MIN_BODY_DISTANCE+0.002)
+    position.x=clampf(target,-11.5,11.5)
+  collision_layer=2 if hp>0 else 0;collision_mask=3
 func correct_jump_contact():
  var active=state in ["jump_start","jump_air","jump_land"] or landing_contact_time>0
  if not active:return
@@ -335,7 +304,6 @@ func build_roll_clips():
  var roll=animator.get_animation("Sprinting Forward Roll")
  library.add_animation(ROLL_STOP_CLIP,make_pose_recovery(roll,roll.length*0.80,0.14))
 func start_roll_attack():
- attack_after_turn=false;turn_after_standing=false;turn_attack_presses=0
  var axis=roll_attack_input_axis if roll_attack_buffer>0 else Input.get_axis("left","right")
  if not is_zero_approx(axis):facing=signf(axis)
  visual.rotation.y=facing*PI/2
@@ -343,6 +311,7 @@ func start_roll_attack():
  roll_attack_window=0;roll_attack_buffer=0;dodge_buffer=0
  start_slash()
 func start_slash():
+ combo_presses=0
  attack_phase=0;attack_previous_distance=0
  var clip=active_attack_clip()
  var rate=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
@@ -370,6 +339,7 @@ func start_dodge(axis:float):
  else:
   dodge_direction=signf(axis);facing=dodge_direction;dodge_clip="Sprinting Forward Roll"
  begin("dodge",0.68 if dodge_clip=="Sprinting Forward Roll" else 0.88)
+ set_roll_phasing(dodge_clip=="Sprinting Forward Roll")
  play_anim(dodge_clip);animator.seek(0,true)
 func start_jump(axis:float):
  set_crouched(false);shield_raised=false
@@ -394,10 +364,8 @@ func jump_land_state():
   start_dodge(buffered_dodge_axis)
   return
  var axis=Input.get_axis("left","right") if not enemy else 0.0
- if axis*facing<0:
-  start_turn()
- elif not is_zero_approx(axis):
-  velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
+ if not is_zero_approx(axis):
+  facing=signf(axis);velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
  else:
   # Replace the moving clip's running tail with a landing-to-idle recovery.
   var from_pose=animator.get_animation(jump_clip)
@@ -449,7 +417,7 @@ func play_anim(key:String,loop=false):
  var animation=animator.get_animation(key)
  animation.loop_mode=Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
  animator.speed_scale=1.0
- if state in ["heal","hurt","crouch_enter","crouch_exit","guard_enter","attack_recover","jump_land","turn"] or (state=="dodge" and key==dodge_clip):
+ if state in ["heal","hurt","crouch_enter","crouch_exit","guard_enter","attack_recover","jump_land"] or (state=="dodge" and key==dodge_clip):
   animator.speed_scale=animation.length/maxf(action_duration,0.1)
  if state=="attack":animator.speed_scale=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
  elif key=="run":animator.speed_scale=1.35
@@ -457,7 +425,6 @@ func play_anim(key:String,loop=false):
  if state=="attack_recover":blend=0.02
  if key==ROLL_FOLLOW_CLIP and animator.current_animation==ROLL_ATTACK_CLIP:blend=0.12
  if key==COMBO_CLIPS[2] and animator.current_animation==ROLL_FOLLOW_CLIP:blend=0.12
- if state=="turn":blend=0.08
  if key==LAND_STOP_CLIP:blend=0.025
  if state=="dodge":blend=0.10 if key==dodge_clip and dodge_clip=="Sprinting Forward Roll" else 0.04
  if state=="dodge" and key in ["idle","run"]:blend=0.10
@@ -465,6 +432,7 @@ func play_anim(key:String,loop=false):
  elif animator.current_animation=="Sprinting Forward Roll":blend=0.12
  animator.play(key,blend)
 func begin(s:String,t:float):
+ if s!="dodge" and roll_phasing:set_roll_phasing(false)
  state=s;timer=t;action_duration=t;struck=false;last_anim=""
  if s!="hurt":hit_push_velocity=0
  if s in ["attack","dodge","jump_start","heal","crouch_exit"]:shield_raised=false
@@ -508,13 +476,9 @@ func _physics_process(dt):
    if state=="dodge" and (roll_finishing or timer<action_duration*0.4):
     roll_attack_input_axis=axis
     roll_attack_buffer=maxf(0.25,timer+0.05)
-   elif state=="turn" and roll_attack_window>0:
-    start_roll_attack()
-   elif state=="turn" or (state=="crouch_exit" and turn_after_standing):
-    if attack_after_turn:turn_attack_presses=mini(turn_attack_presses+1,2)
-    else:attack_after_turn=true;turn_attack_presses=0
-   elif state=="attack":combo_presses=mini(combo_presses+1,2-combo_index)
-   elif state=="attack_recover" and combo_index<2:
+   elif state=="attack" and combo_index<max_combo_stage() and (combo_roll_opener or timer<=ATTACK_BUFFER_WINDOW):
+    combo_presses=1
+   elif state=="attack_recover" and combo_index<max_combo_stage():
     combo_index+=1;start_slash()
   if state in ["idle","crouched"]:
    if dodge_buffer>0 and is_on_floor():
@@ -523,9 +487,8 @@ func _physics_process(dt):
     start_jump(axis)
    elif state=="idle" and Input.is_action_just_pressed("attack"):
     if roll_attack_window>0:start_roll_attack()
-    elif axis*facing<0 and is_on_floor():
-     attack_after_turn=true;turn_attack_presses=0;start_ground_reversal()
     else:
+     if not is_zero_approx(axis):facing=signf(axis)
      combo_index=0;combo_presses=0;combo_roll_opener=false
      start_slash()
    elif state=="idle" and Input.is_action_just_pressed("heal") and potions>0:
@@ -534,10 +497,9 @@ func _physics_process(dt):
     set_crouched(true);begin("crouch_enter",0.15)
    elif state=="crouched" and not want_crouch:
     begin("crouch_exit",0.18)
-   elif axis*facing<0 and is_on_floor():
-    start_ground_reversal()
   if state in ["idle","crouched"] and block and not shield_raised:start_guard()
- if state!="turn":visual.rotation.y=lerp_angle(visual.rotation.y,facing*PI/2,dt*18)
+  if axis!=0 and state in ["idle","crouched"]:facing=signf(axis)
+ visual.rotation.y=lerp_angle(visual.rotation.y,facing*PI/2,minf(dt*30,1))
  velocity.x=0
  match state:
   "idle":
@@ -557,8 +519,7 @@ func _physics_process(dt):
    play_anim("Crouch To Standing")
    if timer<=0:
     set_crouched(false)
-    if turn_after_standing:turn_after_standing=false;start_turn()
-    else:begin("idle",0)
+    begin("idle",0)
   "guard_enter":
    play_anim(guard_clip)
    velocity.x=0 if crouched else axis*1.8
@@ -580,22 +541,8 @@ func _physics_process(dt):
   "jump_land":
    if dodge_buffer>0:start_dodge(buffered_dodge_axis)
    elif not is_zero_approx(axis):
-    if axis*facing<0:start_turn()
-    else:velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
+    facing=signf(axis);velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
    elif timer<=0:begin("idle",0)
-  "turn":
-   play_anim(TURN_CLIP)
-   var phase=clampf(1.0-timer/action_duration,0,1)
-   visual.rotation.y=turn_start_yaw+turn_yaw.sample(phase)
-   apply_attack_motion(TURN_SOURCE,0,clip_duration(TURN_SOURCE),phase*clip_duration(TURN_SOURCE),dt)
-   if timer<=0:
-    facing=-turn_from_facing
-    if attack_after_turn:
-     attack_after_turn=false;combo_index=0;combo_presses=turn_attack_presses;combo_roll_opener=false
-     turn_attack_presses=0;start_slash()
-    else:
-     begin("idle",0)
-     play_anim("run" if not is_zero_approx(axis) else "idle",true)
   "windup":
    play_anim("block",false)
    flash.scale=Vector3.ONE*(1.2+sin(timer*22)*0.15)
@@ -616,8 +563,8 @@ func _physics_process(dt):
      foe.hurt(22,self)
    if timer<=0:
     if enemy:begin("idle",0);cooldown=1.2
-    elif combo_presses>0 and combo_index<2:
-     combo_presses-=1;combo_index+=1;start_slash()
+    elif combo_presses>0 and combo_index<max_combo_stage():
+     combo_presses=0;combo_index+=1;start_slash()
     else:start_attack_recovery()
   "attack_recover":
    play_anim(active_recovery_clip())
@@ -702,7 +649,6 @@ func hurt(damage:float,source:Node):
  if crouched:push_speed*=0.7
  hit_push_velocity=push_direction*push_speed
  velocity.x=hit_push_velocity
- attack_after_turn=false;turn_after_standing=false;turn_attack_presses=0
  combo_presses=0;roll_attack_window=0;roll_attack_buffer=0
  begin("hurt",clip_duration(reaction_clip))
  arena.shake=0.13
