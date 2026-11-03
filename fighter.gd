@@ -2,6 +2,10 @@ extends CharacterBody3D
 var enemy=false
 const MAX_HEALTH=250.0
 const RUN_SPEED=5.5
+const BODY_RADIUS=0.42
+const MIN_BODY_DISTANCE=BODY_RADIUS*2.0
+const MELEE_REACH=1.65
+const ENEMY_APPROACH_DISTANCE=1.25
 const ATTACK_RATE=2.1
 var hp=MAX_HEALTH
 var attack_phase=0.0
@@ -30,6 +34,9 @@ const LAND_STOP_CLIP="__landing_stop"
 var turn_yaw:Curve
 var turn_start_yaw=0.0
 var turn_from_facing=1.0
+var turn_after_standing=false
+var attack_after_turn=false
+var turn_attack_presses=0
 var jump_visual_base=0.0
 var landing_contact_time=0.0
 const ROLL_ATTACK_HIT=0.7333333
@@ -70,7 +77,6 @@ var dodge_direction=1.0
 var dodge_clip="Sprinting Forward Roll"
 var jump_clip="Sword And Shield Jump"
 var reaction_clip="Impact"
-var knockback_direction=0.0
 var capsule:CapsuleShape3D
 var body_shape:CollisionShape3D
 var visual:Node3D
@@ -80,11 +86,11 @@ var arena:Node
 var last_anim=""
 var flash:MeshInstance3D
 func _ready():
- # Fighters collide with the floor, but can cross one another.
+ # Solid character bodies stop one another; they do not transfer impulses.
  collision_layer=2
- collision_mask=1
+ collision_mask=3
  var shape=CollisionShape3D.new()
- var cap=CapsuleShape3D.new();cap.radius=0.3;cap.height=1.8
+ var cap=CapsuleShape3D.new();cap.radius=BODY_RADIUS;cap.height=1.8
  shape.shape=cap;shape.position.y=0.9;add_child(shape)
  capsule=cap;body_shape=shape
  visual=load("res://assets/knight.glb").instantiate();add_child(visual)
@@ -170,6 +176,11 @@ func build_turn_clip():
    var q=source.track_get_key_value(track,key)
    source.track_set_key_value(track,key,(parent_yaw.inverse()*q).normalized())
  animator.get_animation_library("").add_animation(TURN_CLIP,source)
+func start_ground_reversal():
+ if crouched:
+  turn_after_standing=true
+  begin("crouch_exit",0.18)
+ else:start_turn()
 func start_turn():
  turn_from_facing=facing
  turn_start_yaw=facing*PI/2
@@ -320,6 +331,7 @@ func build_roll_clips():
  var roll=animator.get_animation("Sprinting Forward Roll")
  library.add_animation(ROLL_STOP_CLIP,make_pose_recovery(roll,roll.length*0.80,0.14))
 func start_roll_attack():
+ attack_after_turn=false;turn_after_standing=false;turn_attack_presses=0
  var axis=roll_attack_input_axis if roll_attack_buffer>0 else Input.get_axis("left","right")
  if not is_zero_approx(axis):facing=signf(axis)
  visual.rotation.y=facing*PI/2
@@ -460,9 +472,13 @@ func _physics_process(dt):
  roll_attack_buffer=maxf(0,roll_attack_buffer-dt)
  landing_contact_time=maxf(0,landing_contact_time-dt)
  if hp<=0:
+  collision_layer=0
   play_anim("death");velocity=Vector3.ZERO;flash.visible=false
   if not enemy and timer<=0:
-   hp=MAX_HEALTH;position=Vector3(-3,0.1,0);set_crouched(false);begin("idle",0)
+   hp=MAX_HEALTH;position=Vector3(-3,0.1,0)
+   if absf(position.x-foe.position.x)<MIN_BODY_DISTANCE+0.1:
+    position.x=foe.position.x+2.0 if foe.position.x<-9.5 else foe.position.x-2.0
+   collision_layer=2;set_crouched(false);begin("idle",0)
   return
  if enemy and arena.finished:
   velocity=Vector3.ZERO;flash.visible=false;play_anim("idle",true);return
@@ -472,7 +488,7 @@ func _physics_process(dt):
  if enemy:
   if state=="idle":
    facing=1.0 if foe.position.x>position.x else -1.0
-   if absf(foe.position.x-position.x)>1.85:axis=facing
+   if absf(foe.position.x-position.x)>ENEMY_APPROACH_DISTANCE:axis=facing
    elif cooldown<=0:begin("windup",0.75)
  else:
   axis=Input.get_axis("left","right")
@@ -487,6 +503,11 @@ func _physics_process(dt):
    if state=="dodge" and (roll_finishing or timer<action_duration*0.4):
     roll_attack_input_axis=axis
     roll_attack_buffer=maxf(0.25,timer+0.05)
+   elif state=="turn" and roll_attack_window>0:
+    start_roll_attack()
+   elif state=="turn" or (state=="crouch_exit" and turn_after_standing):
+    if attack_after_turn:turn_attack_presses=mini(turn_attack_presses+1,2)
+    else:attack_after_turn=true;turn_attack_presses=0
    elif state=="attack":combo_presses=mini(combo_presses+1,2-combo_index)
    elif state=="attack_recover" and combo_index<2:
     combo_index+=1;start_slash()
@@ -496,8 +517,9 @@ func _physics_process(dt):
    elif Input.is_action_just_pressed("jump") and is_on_floor():
     start_jump(axis)
    elif state=="idle" and Input.is_action_just_pressed("attack"):
-    if not is_zero_approx(axis):facing=signf(axis)
     if roll_attack_window>0:start_roll_attack()
+    elif axis*facing<0 and is_on_floor():
+     attack_after_turn=true;turn_attack_presses=0;start_ground_reversal()
     else:
      combo_index=0;combo_presses=0;combo_roll_opener=false
      start_slash()
@@ -507,10 +529,9 @@ func _physics_process(dt):
     set_crouched(true);begin("crouch_enter",0.15)
    elif state=="crouched" and not want_crouch:
     begin("crouch_exit",0.18)
-   elif state=="idle" and axis*facing<0 and absf(velocity.x)>RUN_SPEED*0.3 and not block and is_on_floor():
-    start_turn()
+   elif axis*facing<0 and is_on_floor():
+    start_ground_reversal()
   if state in ["idle","crouched"] and block and not shield_raised:start_guard()
-  if axis!=0 and state in ["idle","crouched"] and not block:facing=signf(axis)
  if state!="turn":visual.rotation.y=lerp_angle(visual.rotation.y,facing*PI/2,dt*18)
  velocity.x=0
  match state:
@@ -529,7 +550,10 @@ func _physics_process(dt):
     animator.seek(animator.get_animation("Crouch").length,true);animator.pause()
   "crouch_exit":
    play_anim("Crouch To Standing")
-   if timer<=0:set_crouched(false);begin("idle",0)
+   if timer<=0:
+    set_crouched(false)
+    if turn_after_standing:turn_after_standing=false;start_turn()
+    else:begin("idle",0)
   "guard_enter":
    play_anim(guard_clip)
    velocity.x=0 if crouched else axis*1.8
@@ -561,8 +585,12 @@ func _physics_process(dt):
    apply_attack_motion(TURN_SOURCE,0,clip_duration(TURN_SOURCE),phase*clip_duration(TURN_SOURCE),dt)
    if timer<=0:
     facing=-turn_from_facing
-    begin("idle",0)
-    play_anim("run" if not is_zero_approx(axis) else "idle",true)
+    if attack_after_turn:
+     attack_after_turn=false;combo_index=0;combo_presses=turn_attack_presses;combo_roll_opener=false
+     turn_attack_presses=0;start_slash()
+    else:
+     begin("idle",0)
+     play_anim("run" if not is_zero_approx(axis) else "idle",true)
   "windup":
    play_anim("block",false)
    flash.scale=Vector3.ONE*(1.2+sin(timer*22)*0.15)
@@ -579,7 +607,7 @@ func _physics_process(dt):
     else:apply_attack_motion(COMBO_SOURCE,COMBO_STARTS[combo_index],COMBO_ENDS[combo_index],attack_phase,dt)
    if attack_phase>=hit_time and not struck:
     struck=true
-    if absf(foe.position.x-position.x)<2.25 and absf(foe.position.y-position.y)<1.2 and (foe.position.x-position.x)*facing>0:
+    if absf(foe.position.x-position.x)<MELEE_REACH and absf(foe.position.y-position.y)<1.2 and (foe.position.x-position.x)*facing>0:
      foe.hurt(22,self)
    if timer<=0:
     if enemy:begin("idle",0);cooldown=1.2
@@ -637,7 +665,7 @@ func _physics_process(dt):
      begin("idle",0)
      play_anim("idle" if is_zero_approx(axis) else "run",true)
   "hurt":
-   play_anim(reaction_clip);velocity.x=knockback_direction*(0.3 if "Shield" in reaction_clip else 1.5)
+   play_anim(reaction_clip);velocity.x=0
    if timer<=0:
     begin("crouched" if crouched else "idle",0)
   "heal":
@@ -661,7 +689,8 @@ func hurt(damage:float,source:Node):
   hp-=damage
   reaction_clip="Back Impact" if behind else ("Crouch Impact" if crouched else "Impact")
   arena.notice="Heavy strike!" if damage>25 else "Steel meets steel"
- knockback_direction=signf(position.x-source.position.x)
+ velocity.x=0
+ attack_after_turn=false;turn_after_standing=false;turn_attack_presses=0
  combo_presses=0;roll_attack_window=0;roll_attack_buffer=0
  begin("hurt",clip_duration(reaction_clip))
  arena.shake=0.13
