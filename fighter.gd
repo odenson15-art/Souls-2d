@@ -13,6 +13,9 @@ const HIT_PUSH_DRAG=18.0
 var hit_push_velocity=0.0
 var roll_phasing=false
 const ATTACK_BUFFER_WINDOW=0.35
+const ENEMY_POISE_LIMIT=60.0
+var enemy_poise=0.0
+var enemy_poise_cooldown=0.0
 var hp=MAX_HEALTH
 var attack_phase=0.0
 var attack_previous_distance=0.0
@@ -460,6 +463,8 @@ func play_anim(key:String,loop=false):
  var blend=0.03 if state=="attack" else 0.06
  if state=="attack_recover":blend=0.02
  if key==COMBO_CLIPS[1] and animator.current_animation in [COMBO_CLIPS[2],COMBO_RECOVERIES[2]]:blend=0.12
+ if state=="attack" and key==ROLL_ATTACK_CLIP and animator.current_animation in ["Sprinting Forward Roll","Standing Dodge Backward",ROLL_STOP_CLIP,"run","idle"]:blend=0.12
+ if state=="dodge" and key in ["Sprinting Forward Roll","Standing Dodge Backward"] and animator.current_animation in ["run","idle","attack_recover"]:blend=0.12
  if key==ROLL_FOLLOW_CLIP and animator.current_animation==ROLL_ATTACK_CLIP:blend=0.12
  if key==COMBO_CLIPS[2] and animator.current_animation==ROLL_FOLLOW_CLIP:blend=0.12
  if key==LAND_STOP_CLIP:blend=0.025
@@ -496,6 +501,8 @@ func enemy_finish_pattern():
 func _physics_process(dt):
  if not foe:return
  timer=maxf(0,timer-dt);cooldown-=dt
+ enemy_poise_cooldown=maxf(0,enemy_poise_cooldown-dt)
+ if enemy and enemy_poise_cooldown<=0:enemy_poise=move_toward(enemy_poise,0,22.0*dt)
  dodge_buffer=maxf(0,dodge_buffer-dt)
  roll_attack_window=maxf(0,roll_attack_window-dt)
  roll_attack_buffer=maxf(0,roll_attack_buffer-dt)
@@ -527,12 +534,12 @@ func _physics_process(dt):
    start_guard_release()
   elif not block:shield_raised=false
   if Input.is_action_just_pressed("dodge"):
-   dodge_buffer=0.4;buffered_dodge_axis=axis
+   dodge_buffer=1.0;buffered_dodge_axis=axis
   want_crouch=Input.is_action_pressed("crouch")
   var normal_press=Input.is_action_just_pressed("attack")
   var strong_press=Input.is_action_just_pressed("strong_attack")
   var matching_press=strong_press if combo_roll_opener else normal_press
-  if strong_press and state=="dodge" and (roll_finishing or timer<action_duration*0.4):
+  if strong_press and state=="dodge":
    roll_attack_input_axis=axis
    roll_attack_buffer=maxf(0.25,timer+0.05)
   elif matching_press:
@@ -627,24 +634,28 @@ func _physics_process(dt):
      foe.hurt(22,self)
    if timer<=0:
     if enemy:enemy_next_step()
+    elif dodge_buffer>0:start_dodge(buffered_dodge_axis)
     elif combo_presses>0 and can_chain_attack():
      continue_attack()
     else:start_attack_recovery()
   "attack_recover":
-   play_anim(active_recovery_clip())
-   if combo_roll_opener and combo_index==0:
-    attack_phase+=dt*PLAYER_COMBO_RATE
-    apply_attack_motion(ROLL_ATTACK_SOURCE,ROLL_ATTACK_END,minf(1.7333333,clip_duration(ROLL_ATTACK_SOURCE)),attack_phase,dt)
-   elif combo_roll_opener and combo_index==1:
-    attack_phase+=dt*PLAYER_COMBO_RATE
-    apply_attack_motion(ROLL_FOLLOW_SOURCE,ROLL_FOLLOW_END,minf(2.4333333,clip_duration(ROLL_FOLLOW_SOURCE)),attack_phase,dt)
-   elif combo_index==2:
-    attack_phase+=dt*PLAYER_COMBO_RATE
-    apply_attack_motion(COMBO_SOURCE,COMBO_ENDS[2],4.1666667,attack_phase,dt)
-   if timer<=0:
-    combo_presses=0;combo_index=0
-    if enemy:enemy_finish_pattern()
-    else:begin("idle",0)
+   if dodge_buffer>0 and not enemy and is_on_floor():
+    start_dodge(buffered_dodge_axis)
+   else:
+    play_anim(active_recovery_clip())
+    if combo_roll_opener and combo_index==0:
+     attack_phase+=dt*PLAYER_COMBO_RATE
+     apply_attack_motion(ROLL_ATTACK_SOURCE,ROLL_ATTACK_END,minf(1.7333333,clip_duration(ROLL_ATTACK_SOURCE)),attack_phase,dt)
+    elif combo_roll_opener and combo_index==1:
+     attack_phase+=dt*PLAYER_COMBO_RATE
+     apply_attack_motion(ROLL_FOLLOW_SOURCE,ROLL_FOLLOW_END,minf(2.4333333,clip_duration(ROLL_FOLLOW_SOURCE)),attack_phase,dt)
+    elif combo_index==2:
+     attack_phase+=dt*PLAYER_COMBO_RATE
+     apply_attack_motion(COMBO_SOURCE,COMBO_ENDS[2],4.1666667,attack_phase,dt)
+    if timer<=0:
+     combo_presses=0;combo_index=0
+     if enemy:enemy_finish_pattern()
+     else:begin("idle",0)
   "dodge":
    if not roll_finishing:play_anim(dodge_clip)
    var progress=1.0-timer/action_duration
@@ -722,6 +733,19 @@ func hurt(damage:float,source:Node):
  hit_push_velocity=push_direction*push_speed
  velocity.x=hit_push_velocity
  combo_presses=0;roll_attack_window=0;roll_attack_buffer=0
- begin("hurt",clip_duration(reaction_clip))
+ if enemy and not guarding and state in ["attack","attack_recover"]:
+  # Ordinary hits deal damage and a small recoil, but do not cancel the combo.
+  # Three close hits break poise and earn a short stagger.
+  enemy_poise+=damage
+  enemy_poise_cooldown=1.0
+  if enemy_poise<ENEMY_POISE_LIMIT:
+   hit_push_velocity*=0.35
+   velocity.x=hit_push_velocity
+   return
+  enemy_poise=0
+  begin("hurt",0.42)
+ else:
+  begin("hurt",0.32 if enemy else clip_duration(reaction_clip))
  arena.shake=0.13
- if hp<=0:hp=0;set_crouched(false);begin("dead",2.6);arena.finish(not enemy)
+ if hp<=0:
+  hp=0;set_crouched(false);begin("dead",2.6);arena.finish(not enemy)

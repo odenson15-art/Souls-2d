@@ -13,7 +13,7 @@ func bind(action:String,keys:Array):
   var e=InputEventKey.new();e.physical_keycode=k;InputMap.action_add_event(action,e)
 func _ready():
  bind("jump",[KEY_SPACE]);bind("crouch",[KEY_DOWN])
- bind("left",[KEY_LEFT]);bind("right",[KEY_RIGHT]);bind("attack",[KEY_S]);bind("strong_attack",[KEY_D]);bind("block",[KEY_C]);bind("dodge",[KEY_A]);bind("heal",[KEY_SHIFT]);bind("restart",[KEY_R])
+ bind("left",[KEY_LEFT]);bind("right",[KEY_RIGHT]);bind("attack",[KEY_S]);bind("strong_attack",[KEY_W]);bind("block",[KEY_D]);bind("dodge",[KEY_A]);bind("heal",[KEY_SHIFT]);bind("restart",[KEY_R])
  var dojo=Node3D.new();dojo.set_script(load("res://dojo.gd"));add_child(dojo)
  player=CharacterBody3D.new();player.set_script(load("res://fighter.gd"));player.position=Vector3(-3,0.1,0);player.arena=self;add_child(player)
  enemy=CharacterBody3D.new();enemy.set_script(load("res://fighter.gd"));enemy.enemy=true;enemy.position=Vector3(3,0.1,0);enemy.arena=self;add_child(enemy);player.foe=enemy;enemy.foe=player
