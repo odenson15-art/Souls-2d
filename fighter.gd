@@ -11,7 +11,6 @@ const HIT_PUSH_DRAG=18.0
 var hit_push_velocity=0.0
 var roll_phasing=false
 const ATTACK_BUFFER_WINDOW=0.35
-const ATTACK_RATE=2.1
 var hp=MAX_HEALTH
 var attack_phase=0.0
 var attack_previous_distance=0.0
@@ -67,7 +66,11 @@ const COMBO_ENDS=[1.4,2.4333333,3.4]
 const COMBO_STRIKES=[0.9666667,1.9333333,2.9666667]
 const COMBO_CLIPS=["__combo_1","__combo_2","__combo_3"]
 const COMBO_RECOVERIES=["__combo_recover_1","__combo_recover_2","__combo_recover_3"]
-const ENEMY_ATTACK_CLIP="Sword And Shield Slash1"
+const ENEMY_PATTERN=["swing_1","swing_2","roll","roll_attack","swing_1","roll","roll_attack","roll_followup"]
+signal enemy_step_started(action:String)
+var enemy_pattern_index=0
+var enemy_sequence_active=false
+var enemy_pattern_cycles=0
 var action_duration=0.0
 var crouched=false
 var dodge_direction=1.0
@@ -178,7 +181,6 @@ func apply_attack_motion(source:String,start:float,end:float,elapsed:float,dt:fl
  velocity.x=facing*(distance-attack_previous_distance)/dt
  attack_previous_distance=distance
 func active_attack_clip()->String:
- if enemy:return ENEMY_ATTACK_CLIP
  if combo_roll_opener and combo_index==0:return ROLL_ATTACK_CLIP
  if combo_roll_opener and combo_index==1:return ROLL_FOLLOW_CLIP
  return COMBO_CLIPS[combo_index]
@@ -304,7 +306,7 @@ func build_roll_clips():
  var roll=animator.get_animation("Sprinting Forward Roll")
  library.add_animation(ROLL_STOP_CLIP,make_pose_recovery(roll,roll.length*0.80,0.14))
 func start_roll_attack():
- var axis=roll_attack_input_axis if roll_attack_buffer>0 else Input.get_axis("left","right")
+ var axis=signf(foe.position.x-position.x) if enemy else (roll_attack_input_axis if roll_attack_buffer>0 else Input.get_axis("left","right"))
  if not is_zero_approx(axis):facing=signf(axis)
  visual.rotation.y=facing*PI/2
  combo_index=0;combo_presses=0;combo_roll_opener=true
@@ -314,7 +316,7 @@ func start_slash():
  combo_presses=0
  attack_phase=0;attack_previous_distance=0
  var clip=active_attack_clip()
- var rate=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
+ var rate=PLAYER_COMBO_RATE
  begin("attack",clip_duration(clip)/rate)
  play_anim(clip)
  animator.seek(0,true)
@@ -419,7 +421,7 @@ func play_anim(key:String,loop=false):
  animator.speed_scale=1.0
  if state in ["heal","hurt","crouch_enter","crouch_exit","guard_enter","attack_recover","jump_land"] or (state=="dodge" and key==dodge_clip):
   animator.speed_scale=animation.length/maxf(action_duration,0.1)
- if state=="attack":animator.speed_scale=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
+ if state=="attack":animator.speed_scale=PLAYER_COMBO_RATE
  elif key=="run":animator.speed_scale=1.35
  var blend=0.03 if state=="attack" else 0.06
  if state=="attack_recover":blend=0.02
@@ -437,6 +439,24 @@ func begin(s:String,t:float):
  if s!="hurt":hit_push_velocity=0
  if s in ["attack","dodge","jump_start","heal","crouch_exit"]:shield_raised=false
  jump_visual_base=0;visual.position.y=0
+func enemy_start_step():
+ var toward=signf(foe.position.x-position.x)
+ if not is_zero_approx(toward):facing=toward
+ var action=ENEMY_PATTERN[enemy_pattern_index]
+ enemy_sequence_active=true
+ if action=="roll":start_dodge(facing)
+ else:
+  combo_roll_opener=action in ["roll_attack","roll_followup"]
+  combo_index=1 if action in ["swing_2","roll_followup"] else 0
+  start_slash()
+ enemy_step_started.emit(action)
+func enemy_next_step():
+ if enemy_pattern_index+1<ENEMY_PATTERN.size():
+  enemy_pattern_index+=1;enemy_start_step()
+ else:start_attack_recovery()
+func enemy_finish_pattern():
+ enemy_sequence_active=false;enemy_pattern_index=0;enemy_pattern_cycles+=1
+ cooldown=0.75;begin("idle",0)
 func _physics_process(dt):
  if not foe:return
  timer=maxf(0,timer-dt);cooldown-=dt
@@ -462,7 +482,8 @@ func _physics_process(dt):
   if state=="idle":
    facing=1.0 if foe.position.x>position.x else -1.0
    if absf(foe.position.x-position.x)>ENEMY_APPROACH_DISTANCE:axis=facing
-   elif cooldown<=0:begin("windup",0.75)
+   elif cooldown<=0:begin("enemy_ready",0.30)
+  elif state=="dodge":axis=dodge_direction
  else:
   axis=Input.get_axis("left","right")
   block=Input.is_action_pressed("block")
@@ -543,26 +564,25 @@ func _physics_process(dt):
    elif not is_zero_approx(axis):
     facing=signf(axis);velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
    elif timer<=0:begin("idle",0)
-  "windup":
-   play_anim("block",false)
+  "enemy_ready":
+   play_anim("idle",true)
    flash.scale=Vector3.ONE*(1.2+sin(timer*22)*0.15)
-   if timer<=0:combo_index=0;start_slash()
+   if timer<=0:enemy_pattern_index=0;enemy_start_step()
   "attack":
    var clip=active_attack_clip()
-   var rate=ATTACK_RATE if enemy else PLAYER_COMBO_RATE
+   var rate=PLAYER_COMBO_RATE
    play_anim(clip)
    attack_phase+=dt*rate
-   var hit_time=clip_duration(clip)*0.42 if enemy else (ROLL_ATTACK_HIT if combo_roll_opener and combo_index==0 else (ROLL_FOLLOW_HIT-ROLL_FOLLOW_START if combo_roll_opener and combo_index==1 else COMBO_STRIKES[combo_index]-COMBO_STARTS[combo_index]))
-   if not enemy:
-    if combo_roll_opener and combo_index==0:apply_attack_motion(ROLL_ATTACK_SOURCE,0,ROLL_ATTACK_END,attack_phase,dt)
-    elif combo_roll_opener and combo_index==1:apply_attack_motion(ROLL_FOLLOW_SOURCE,ROLL_FOLLOW_START,ROLL_FOLLOW_END,attack_phase,dt)
-    else:apply_attack_motion(COMBO_SOURCE,COMBO_STARTS[combo_index],COMBO_ENDS[combo_index],attack_phase,dt)
+   var hit_time=ROLL_ATTACK_HIT if combo_roll_opener and combo_index==0 else (ROLL_FOLLOW_HIT-ROLL_FOLLOW_START if combo_roll_opener and combo_index==1 else COMBO_STRIKES[combo_index]-COMBO_STARTS[combo_index])
+   if combo_roll_opener and combo_index==0:apply_attack_motion(ROLL_ATTACK_SOURCE,0,ROLL_ATTACK_END,attack_phase,dt)
+   elif combo_roll_opener and combo_index==1:apply_attack_motion(ROLL_FOLLOW_SOURCE,ROLL_FOLLOW_START,ROLL_FOLLOW_END,attack_phase,dt)
+   else:apply_attack_motion(COMBO_SOURCE,COMBO_STARTS[combo_index],COMBO_ENDS[combo_index],attack_phase,dt)
    if attack_phase>=hit_time and not struck:
     struck=true
     if absf(foe.position.x-position.x)<MELEE_REACH and absf(foe.position.y-position.y)<1.2 and (foe.position.x-position.x)*facing>0:
      foe.hurt(22,self)
    if timer<=0:
-    if enemy:begin("idle",0);cooldown=1.2
+    if enemy:enemy_next_step()
     elif combo_presses>0 and combo_index<max_combo_stage():
      combo_presses=0;combo_index+=1;start_slash()
     else:start_attack_recovery()
@@ -578,7 +598,9 @@ func _physics_process(dt):
     attack_phase+=dt*PLAYER_COMBO_RATE
     apply_attack_motion(COMBO_SOURCE,COMBO_ENDS[2],4.1666667,attack_phase,dt)
    if timer<=0:
-    combo_presses=0;combo_index=0;begin("idle",0)
+    combo_presses=0;combo_index=0
+    if enemy:enemy_finish_pattern()
+    else:begin("idle",0)
   "dodge":
    if not roll_finishing:play_anim(dodge_clip)
    var progress=1.0-timer/action_duration
@@ -608,7 +630,9 @@ func _physics_process(dt):
      var exit_speed=RUN_SPEED if axis*dodge_direction>0 else 0.0
      speed=lerpf(speed,exit_speed,smoothstep(0.85,1.0,progress))
     velocity.x=dodge_direction*speed
-   if (roll_finishing or (backstep and timer<=0)) and roll_attack_buffer>0:
+   if enemy and timer<=0:
+    enemy_next_step()
+   elif (roll_finishing or (backstep and timer<=0)) and roll_attack_buffer>0:
     start_roll_attack()
    elif timer<=0:
     if dodge_buffer>0:start_dodge(buffered_dodge_axis)
@@ -621,11 +645,14 @@ func _physics_process(dt):
    velocity.x=hit_push_velocity
    hit_push_velocity=move_toward(hit_push_velocity,0,HIT_PUSH_DRAG*dt)
    if timer<=0:
-    begin("crouched" if crouched else "idle",0)
+    if enemy and enemy_sequence_active:
+     if enemy_pattern_index+1<ENEMY_PATTERN.size():enemy_next_step()
+     else:enemy_finish_pattern()
+    else:begin("crouched" if crouched else "idle",0)
   "heal":
    play_anim("power up")
    if timer<=0:hp=minf(MAX_HEALTH,hp+100);begin("idle",0);arena.notice="Restored 100 health"
- flash.visible=enemy and state=="windup"
+ flash.visible=enemy and state=="enemy_ready"
  var gravity=24.0 if state=="jump_air" and velocity.y>0 and Input.is_action_pressed("jump") and jump_hold_time<0.16 else 32.0
  velocity.y-=gravity*dt
  move_and_slide();position.z=0;position.x=clampf(position.x,-11.5,11.5)

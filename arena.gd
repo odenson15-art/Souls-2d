@@ -18,28 +18,16 @@ func bind(action:String,keys:Array):
 func _ready():
  bind("jump",[KEY_SPACE]);bind("crouch",[KEY_S,KEY_DOWN])
  bind("left",[KEY_A,KEY_LEFT]);bind("right",[KEY_D,KEY_RIGHT]);bind("attack",[KEY_Z]);bind("block",[KEY_C]);bind("dodge",[KEY_V]);bind("heal",[KEY_B]);bind("restart",[KEY_R])
- var world=WorldEnvironment.new();var env=Environment.new();env.background_mode=Environment.BG_COLOR;env.background_color=Color("101827");env.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR;env.ambient_light_color=Color("9ab4cf");env.ambient_light_energy=0.65;env.tonemap_mode=Environment.TONE_MAPPER_FILMIC;world.environment=env;add_child(world)
- var sun=DirectionalLight3D.new();sun.rotation_degrees=Vector3(-45,-35,0);sun.light_color=Color("ffdda5");sun.light_energy=1.5;sun.shadow_enabled=true;add_child(sun)
- box(Vector3(0,-0.35,0),Vector3(26,0.7,6),Color("3c4554"),true)
- for x in range(-12,13,2):
-  box(Vector3(x,0.015,0),Vector3(0.025,0.03,5.8),Color("677080"))
- for x in [-12,-8,-4,0,4,8,12]:
-  box(Vector3(x,1.7,-3.4),Vector3(0.65,3.4,0.7),Color("293544"))
-  box(Vector3(x,3.5,-3.4),Vector3(1.0,0.3,1),Color("596275"))
- for x in [-10,10]:
-  box(Vector3(x,0.45,-2),Vector3(1,0.9,1),Color("242a36"))
-  var fire=OmniLight3D.new();fire.position=Vector3(x,1.4,-2);fire.light_color=Color("ff913a");fire.light_energy=3;fire.omni_range=5;add_child(fire)
-  box(Vector3(x,1.05,-2),Vector3(0.6,0.25,0.6),Color("ffad52"))
- box(Vector3(0,4,-3.4),Vector3(25,0.6,0.8),Color("293544"))
+ var dojo=Node3D.new();dojo.set_script(load("res://dojo.gd"));add_child(dojo)
  player=CharacterBody3D.new();player.set_script(load("res://fighter.gd"));player.position=Vector3(-3,0.1,0);player.arena=self;add_child(player)
  enemy=CharacterBody3D.new();enemy.set_script(load("res://fighter.gd"));enemy.enemy=true;enemy.position=Vector3(3,0.1,0);enemy.arena=self;add_child(enemy);player.foe=enemy;enemy.foe=player
- camera=Camera3D.new();camera.projection=Camera3D.PROJECTION_ORTHOGONAL;camera.size=7.5;camera.position=Vector3(0,4.3,12);add_child(camera);camera.look_at(Vector3(0,1,0))
+ camera=Camera3D.new();camera.projection=Camera3D.PROJECTION_PERSPECTIVE;camera.fov=42;camera.near=0.1;camera.far=80;camera.position=Vector3(0,3.6,10.2);add_child(camera);camera.look_at(Vector3(0,1.2,0))
  var ui=CanvasLayer.new();add_child(ui)
  var panel=ColorRect.new();panel.color=Color(0.025,0.035,0.055,0.9);panel.position=Vector2(24,24);panel.size=Vector2(380,120);ui.add_child(panel)
- hud=label(ui,Vector2(42,34),24,"EMBER YARD  /  TRAINING")
+ hud=label(ui,Vector2(42,34),24,"ASHEN HALL  /  DOJO")
  health=bar(ui,Vector2(42,78),Color("e26663"));health.max_value=player.MAX_HEALTH
  label(ui,Vector2(42,106),16,"HEALTH")
- label(ui,Vector2(882,35),20,"THE ASHEN SPARRING KNIGHT")
+ label(ui,Vector2(882,35),20,"THE MIRROR KNIGHT")
  enemy_health=bar(ui,Vector2(882,72),Color("d78761"));enemy_health.max_value=enemy.MAX_HEALTH
  hint=label(ui,Vector2(30,570),21,"")
  label(ui,Vector2(30,655),18,"A/D  MOVE     Z  COMBO     C  GUARD     V  DODGE     B  HEAL     R  RESET")

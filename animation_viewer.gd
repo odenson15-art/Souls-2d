@@ -15,6 +15,8 @@ var saved_enemy:Transform3D
 var saved_rotation:Vector3
 var saved_camera:Transform3D
 var saved_camera_size=14.0
+var saved_camera_fov=42.0
+var saved_camera_projection=Camera3D.PROJECTION_PERSPECTIVE
 var saved_player_physics=true
 var saved_enemy_physics=true
 
@@ -78,11 +80,12 @@ func toggle():
   saved_player=arena.player.transform;saved_enemy=arena.enemy.transform
   saved_rotation=arena.player.visual.rotation
   saved_camera=arena.camera.transform;saved_camera_size=arena.camera.size
+  saved_camera_fov=arena.camera.fov;saved_camera_projection=arena.camera.projection
   saved_player_physics=arena.player.is_physics_processing();saved_enemy_physics=arena.enemy.is_physics_processing()
   arena.player.set_physics_process(false);arena.enemy.set_physics_process(false)
   arena.enemy.hide();arena.player.flash.hide()
   arena.player.position=Vector3(2,0,0);arena.player.visual.rotation=Vector3(0,PI/4,0)
-  arena.camera.position=Vector3(0,3.3,10);arena.camera.look_at(Vector3(0,1,0));arena.camera.size=9
+  arena.camera.position=Vector3(0,3.3,10);arena.camera.look_at(Vector3(0,1,0));arena.camera.projection=Camera3D.PROJECTION_PERSPECTIVE;arena.camera.fov=40
   search.release_focus()
   if selected.is_empty():select_clip(entries[0].clip)
   else:replay()
@@ -91,6 +94,7 @@ func toggle():
   arena.player.transform=saved_player;arena.enemy.transform=saved_enemy
   arena.player.visual.rotation=saved_rotation
   arena.camera.transform=saved_camera;arena.camera.size=saved_camera_size
+  arena.camera.fov=saved_camera_fov;arena.camera.projection=saved_camera_projection
   arena.player.begin("dead" if arena.player.hp<=0 else "idle",2.6 if arena.player.hp<=0 else 0)
   arena.player.velocity=Vector3.ZERO
   arena.player.set_crouched(false)

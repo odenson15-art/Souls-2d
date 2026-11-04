@@ -1,6 +1,6 @@
 config_version=5
 [application]
-config/name="Ember Yard — Knight Training"
+config/name="Ashen Hall — Knight Training"
 run/main_scene="res://arena.tscn"
 [display]
 window/size/viewport_width=1280
@@ -9,3 +9,6 @@ window/stretch/mode="canvas_items"
 [rendering]
 renderer/rendering_method="gl_compatibility"
 environment/defaults/default_clear_color=Color(0.025,0.035,0.055,1)
+
+textures/default_filters/anisotropic_filtering_level=4
+anti_aliasing/quality/msaa_3d=2
