@@ -2,12 +2,14 @@ extends Node3D
 # Modeled and beveled room geometry; all illumination is evaluated in 3D.
 var lamps:Array[Node3D]=[]
 var lights:Array[SpotLight3D]=[]
-var clock=0.0
 const LAMP_POSITIONS=[Vector3(-9,4.45,-2.3),Vector3(-3,4.45,0.65),Vector3(3,4.45,-2.3),Vector3(9,4.45,0.65)]
 func _ready():
  name="AshenHall"
  var room=load("res://assets/dojo/dojo.glb").instantiate();room.name="ModeledDojo";add_child(room)
  for mesh in room.find_children("*","MeshInstance3D",true,false):
+  # Flat floorboards receive character shadows without casting onto themselves.
+  if str(mesh.name).begins_with("Floor"):
+   mesh.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
   for surface in mesh.mesh.get_surface_count():
    var material=mesh.mesh.surface_get_material(surface)
    if material is BaseMaterial3D:material.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
@@ -39,13 +41,11 @@ func _ready():
   light.light_color=Color("ffcf95");light.light_energy=3.0;light.spot_range=10;light.spot_angle=58
   light.shadow_enabled=true;light.shadow_bias=0.025;light.shadow_normal_bias=0.35;light.shadow_blur=1.4
   pivot.add_child(light);light.look_at(Vector3(position_value.x,0,position_value.z-0.35));lights.append(light)
- add_scroll_text("ASHEN\nHALL",Vector3(0,3.55,-7.43),0.0058)
- add_scroll_text("S W O R D   P R A C T I C E",Vector3(0,2.55,-7.43),0.0014)
+ add_scroll_text("無\n心",Vector3(0,3.36,-7.43),0.011)
+ var seal=Label3D.new();seal.text="印";seal.font=load("res://assets/fonts/YujiBoku-Regular.ttf")
+ seal.position=Vector3(0.58,2.35,-7.43);seal.pixel_size=0.004;seal.font_size=64
+ seal.modulate=Color("8c3326");seal.outline_size=0;add_child(seal)
 func add_scroll_text(text:String,pos:Vector3,pixel_size:float):
- var label=Label3D.new();label.text=text;label.position=pos;label.pixel_size=pixel_size;label.font_size=64
+ var label=Label3D.new();label.text=text;label.position=pos;label.pixel_size=pixel_size;label.font_size=64;label.font=load("res://assets/fonts/YujiBoku-Regular.ttf")
  label.modulate=Color("32291f");label.outline_size=0;add_child(label)
-func _process(dt):
- clock+=dt
- for i in range(lamps.size()):
-  lamps[i].rotation.z=sin(clock*0.7+i*1.4)*0.01
-  lights[i].light_energy=3.0*(1.0+sin(clock*1.8+i*2.3)*0.025)
+# Lights remain stable; moving fighters still cast fully dynamic shadows.

@@ -76,16 +76,16 @@ def cloth(name,x,z,m):
  bpy.context.view_layer.objects.active=o;o.select_set(True);bpy.ops.object.modifier_apply(modifier=solid.name);o.select_set(False)
  return finish(o,name,m)
 # Floor is continuous geometry in depth, not a painted backdrop.
-box('Stone foundation',(0,-.26,-1.5),(27,.42,13.5),stone,.045)
-for row in range(36):
+box('Stone foundation',(0,-.26,-.5),(27,.42,15.5),stone,.045)
+for row in range(42):
  z=-7.8+row*.35
  for col in range(10):
   left=-13+col*2.8+(1.4 if row%2 else 0);right=min(left+2.8,13)
   left=max(left,-13)
-  if right>left:box('Beveled floorboard',((left+right)/2,-.035,z),(right-left-.006,.07,.344),random.choice(woods),.005)
- if row%2:box('Staggered board',(-12.3,-.035,z),(1.394,.07,.344),wood,.005)
-for z in [-1.35,1.35]:box('Training lane inlay',(0,.002,z),(23,.004,.024),dark,.001)
-for x in [-11.5,11.5]:box('Lane end',(x,.002,0),(.024,.004,2.7),dark,.001)
+  if right>left:box('Floor | Beveled floorboard',((left+right)/2,-.035,z),(right-left-.006,.07,.344),random.choice(woods),.005)
+ if row%2:box('Floor | Staggered board',(-12.3,-.035,z),(1.394,.07,.344),wood,.005)
+for z in [-1.35,1.35]:box('Floor | Training lane inlay',(0,.008,z),(23,.008,.024),dark,.001)
+for x in [-11.5,11.5]:box('Floor | Lane end',(x,.008,0),(.024,.008,2.7),dark,.001)
 # Recessed architecture and colonnade, several metres behind combat.
 box('Rear wall',(0,3.1,-8.0),(27,6.2,.3),plaster,.04)
 box('Low wall wainscot',(0,.6,-7.78),(26,1.2,.14),wood)
@@ -176,12 +176,13 @@ for i in range(3):
 # Join by material for manageable draw counts; all shapes remain genuine 3D.
 bpy.ops.object.select_all(action='DESELECT')
 for material in list(bpy.data.materials):
- group=[o for o in list(bpy.data.objects) if o.type=='MESH' and material in list(o.data.materials)]
- if not group:continue
- for o in group:o.select_set(True)
- bpy.context.view_layer.objects.active=group[0]
- if len(group)>1:bpy.ops.object.join()
- group[0].name='Dojo '+material.name
- bpy.ops.object.select_all(action='DESELECT')
+ for floor_group in [True,False]:
+  group=[o for o in list(bpy.data.objects) if o.type=='MESH' and material in list(o.data.materials) and o.name.startswith('Floor |')==floor_group]
+  if not group:continue
+  for o in group:o.select_set(True)
+  bpy.context.view_layer.objects.active=group[0]
+  if len(group)>1:bpy.ops.object.join()
+  group[0].name=('Floor | ' if floor_group else 'Dojo ')+material.name
+  bpy.ops.object.select_all(action='DESELECT')
 bpy.ops.export_scene.gltf(filepath=str(ROOT/'assets/dojo/dojo.glb'),export_format='GLB',export_animations=False)
 print('DOJO MODEL COMPLETE')

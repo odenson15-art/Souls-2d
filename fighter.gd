@@ -2,6 +2,8 @@ extends CharacterBody3D
 var enemy=false
 const MAX_HEALTH=250.0
 const RUN_SPEED=5.5
+const RUN_ACCELERATION=38.0
+var ground_speed=0.0
 const BODY_RADIUS=0.42
 const MIN_BODY_DISTANCE=BODY_RADIUS*2.0
 const MELEE_REACH=1.65
@@ -146,9 +148,13 @@ func cache_attack_motion():
     var position_value=sk.global_basis*source.position_track_interpolate(track,source.length*phase)
     curve.add_point(Vector2(phase,position_value.z-origin),0,0,Curve.TANGENT_LINEAR,Curve.TANGENT_LINEAR)
   attack_motion[clip]=curve
-func max_combo_stage()->int:
- # Dodge attack is a two-hit branch; standing combo keeps its three swings.
- return 1 if combo_roll_opener else 2
+func can_chain_attack()->bool:
+ return not combo_roll_opener or combo_index==0
+func next_combo_stage()->int:
+ return combo_index+1 if combo_roll_opener or combo_index<2 else 1
+func continue_attack():
+ combo_index=next_combo_stage()
+ start_slash()
 func set_roll_phasing(enabled:bool):
  if roll_phasing==enabled:return
  roll_phasing=enabled
@@ -352,9 +358,22 @@ func start_jump(axis:float):
  jump_moving=not is_zero_approx(axis)
  jump_air_velocity=axis*RUN_SPEED
  velocity.y=0
- begin("jump_start",0.12*clip_duration(jump_clip) if jump_clip=="Moving Jump" else 0.23*clip_duration(jump_clip))
- play_anim(jump_clip)
- animator.speed_scale=1.0
+ if jump_moving:
+  begin("jump_start",0.12*clip_duration(jump_clip))
+  play_anim(jump_clip)
+  animator.speed_scale=1.0
+ else:
+  # Skip the wide idle/anticipation frames; physics and the takeoff pose start together.
+  begin("jump_air",0)
+  # Clear idle blends before manually sampling the supplied takeoff/flight poses.
+  animator.stop()
+  last_anim=jump_clip
+  animator.play(jump_clip,0)
+  animator.seek(0.36*clip_duration(jump_clip),true)
+  animator.advance(0)
+  jump_air_state()
+  animator.speed_scale=0
+  apply_jump_root_offset()
 func jump_air_state():
  # Preserve chronological source playback across takeoff, flight and landing.
  state="jump_air";timer=0;action_duration=0
@@ -367,7 +386,8 @@ func jump_land_state():
   return
  var axis=Input.get_axis("left","right") if not enemy else 0.0
  if not is_zero_approx(axis):
-  facing=signf(axis);velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
+  facing=signf(axis);velocity.x=jump_air_velocity if axis*jump_facing>0 else 0.0
+  begin("idle",0);ground_speed=velocity.x;play_anim("run",true)
  else:
   # Replace the moving clip's running tail with a landing-to-idle recovery.
   var from_pose=animator.get_animation(jump_clip)
@@ -377,6 +397,20 @@ func jump_land_state():
   library.add_animation(LAND_STOP_CLIP,recovery)
   begin("jump_land",0.14);play_anim(LAND_STOP_CLIP)
 func update_jump_air(dt:float):
+ if not jump_moving:
+  # Tuck during the arc and open the legs only just before actual contact.
+  var height=maxf(0,position.y-jump_flight_start_y)
+  var phase:float
+  if velocity.y>0:
+   phase=lerpf(0.36,0.50,clampf(1.0-velocity.y/11.5,0,1))
+  else:
+   phase=lerpf(0.50,0.61,clampf(-velocity.y/11.5,0,1))
+   if height<0.45:phase=lerpf(0.61,0.76,1.0-clampf(height/0.45,0,1))
+  animator.speed_scale=0
+  animator.seek(phase*clip_duration(jump_clip),true)
+  animator.advance(0)
+  apply_jump_root_offset()
+  return
  # Stop before the stationary clip opens into its wide landing/idle stance.
  var landing_phase=0.80 if jump_clip=="Moving Jump" else 0.70
  var landing_time=landing_phase*clip_duration(jump_clip)
@@ -425,6 +459,7 @@ func play_anim(key:String,loop=false):
  elif key=="run":animator.speed_scale=1.35
  var blend=0.03 if state=="attack" else 0.06
  if state=="attack_recover":blend=0.02
+ if key==COMBO_CLIPS[1] and animator.current_animation in [COMBO_CLIPS[2],COMBO_RECOVERIES[2]]:blend=0.12
  if key==ROLL_FOLLOW_CLIP and animator.current_animation==ROLL_ATTACK_CLIP:blend=0.12
  if key==COMBO_CLIPS[2] and animator.current_animation==ROLL_FOLLOW_CLIP:blend=0.12
  if key==LAND_STOP_CLIP:blend=0.025
@@ -436,6 +471,7 @@ func play_anim(key:String,loop=false):
 func begin(s:String,t:float):
  if s!="dodge" and roll_phasing:set_roll_phasing(false)
  state=s;timer=t;action_duration=t;struck=false;last_anim=""
+ if s!="idle":ground_speed=0
  if s!="hurt":hit_push_velocity=0
  if s in ["attack","dodge","jump_start","heal","crouch_exit"]:shield_raised=false
  jump_visual_base=0;visual.position.y=0
@@ -493,25 +529,28 @@ func _physics_process(dt):
   if Input.is_action_just_pressed("dodge"):
    dodge_buffer=0.4;buffered_dodge_axis=axis
   want_crouch=Input.is_action_pressed("crouch")
-  if Input.is_action_just_pressed("attack"):
-   if state=="dodge" and (roll_finishing or timer<action_duration*0.4):
-    roll_attack_input_axis=axis
-    roll_attack_buffer=maxf(0.25,timer+0.05)
-   elif state=="attack" and combo_index<max_combo_stage() and (combo_roll_opener or timer<=ATTACK_BUFFER_WINDOW):
+  var normal_press=Input.is_action_just_pressed("attack")
+  var strong_press=Input.is_action_just_pressed("strong_attack")
+  var matching_press=strong_press if combo_roll_opener else normal_press
+  if strong_press and state=="dodge" and (roll_finishing or timer<action_duration*0.4):
+   roll_attack_input_axis=axis
+   roll_attack_buffer=maxf(0.25,timer+0.05)
+  elif matching_press:
+   if state=="attack" and can_chain_attack() and (combo_roll_opener or timer<=ATTACK_BUFFER_WINDOW):
     combo_presses=1
-   elif state=="attack_recover" and combo_index<max_combo_stage():
-    combo_index+=1;start_slash()
+   elif state=="attack_recover" and can_chain_attack():
+    continue_attack()
   if state in ["idle","crouched"]:
    if dodge_buffer>0 and is_on_floor():
     start_dodge(buffered_dodge_axis)
    elif Input.is_action_just_pressed("jump") and is_on_floor():
     start_jump(axis)
-   elif state=="idle" and Input.is_action_just_pressed("attack"):
-    if roll_attack_window>0:start_roll_attack()
-    else:
-     if not is_zero_approx(axis):facing=signf(axis)
-     combo_index=0;combo_presses=0;combo_roll_opener=false
-     start_slash()
+   elif state=="idle" and strong_press:
+    start_roll_attack()
+   elif state=="idle" and normal_press:
+    if not is_zero_approx(axis):facing=signf(axis)
+    combo_index=0;combo_presses=0;combo_roll_opener=false
+    start_slash()
    elif state=="idle" and Input.is_action_just_pressed("heal") and potions>0:
     potions-=1;begin("heal",1.3)
    elif state=="idle" and want_crouch and is_on_floor():
@@ -524,8 +563,13 @@ func _physics_process(dt):
  velocity.x=0
  match state:
   "idle":
-   velocity.x=axis*(1.8 if block else RUN_SPEED)
+   if block or is_zero_approx(axis):ground_speed=0
+   else:
+    if ground_speed*axis<0:ground_speed=0
+    ground_speed=move_toward(ground_speed,axis*RUN_SPEED,RUN_ACCELERATION*dt)
+   velocity.x=ground_speed
    play_anim("block idle" if block else ("run" if axis!=0 else "idle"),true)
+   if not block and axis!=0:animator.speed_scale=1.35*lerpf(0.35,1.0,absf(ground_speed)/RUN_SPEED)
   "crouch_enter":
    play_anim("Crouch")
    if timer<=0:state="crouched"
@@ -543,7 +587,7 @@ func _physics_process(dt):
     begin("idle",0)
   "guard_enter":
    play_anim(guard_clip)
-   velocity.x=0 if crouched else axis*1.8
+   velocity.x=0
    if not block or timer<=0:
     begin("crouched" if crouched else "idle",0)
     if block:play_anim(CROUCH_GUARD_HOLD if crouched else "block idle",true)
@@ -562,7 +606,7 @@ func _physics_process(dt):
   "jump_land":
    if dodge_buffer>0:start_dodge(buffered_dodge_axis)
    elif not is_zero_approx(axis):
-    facing=signf(axis);velocity.x=axis*RUN_SPEED;begin("idle",0);play_anim("run",true)
+    facing=signf(axis);velocity.x=0;begin("idle",0);ground_speed=0;play_anim("run",true)
    elif timer<=0:begin("idle",0)
   "enemy_ready":
    play_anim("idle",true)
@@ -583,8 +627,8 @@ func _physics_process(dt):
      foe.hurt(22,self)
    if timer<=0:
     if enemy:enemy_next_step()
-    elif combo_presses>0 and combo_index<max_combo_stage():
-     combo_presses=0;combo_index+=1;start_slash()
+    elif combo_presses>0 and can_chain_attack():
+     continue_attack()
     else:start_attack_recovery()
   "attack_recover":
    play_anim(active_recovery_clip())
@@ -639,6 +683,7 @@ func _physics_process(dt):
     else:
      roll_attack_window=0.22
      begin("idle",0)
+     ground_speed=velocity.x if velocity.x*axis>0 else 0.0
      play_anim("idle" if is_zero_approx(axis) else "run",true)
   "hurt":
    play_anim(reaction_clip)
